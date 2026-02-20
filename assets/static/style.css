@@ -285,17 +285,10 @@ a:hover {
     font-weight: 600;
 }
 
-input[type="text"] {
-    width: 100%;
-    border: 1px solid var(--input-line);
-    border-radius: 10px;
-    padding: 0.55rem 0.65rem;
-    font: inherit;
-    color: var(--text);
-    background: var(--input-bg);
-}
-
-input[type="password"] {
+input[type="text"],
+input[type="password"],
+input[type="email"],
+input[type="number"] {
     width: 100%;
     border: 1px solid var(--input-line);
     border-radius: 10px;
@@ -306,7 +299,9 @@ input[type="password"] {
 }
 
 input[type="text"]:focus,
-input[type="password"]:focus {
+input[type="password"]:focus,
+input[type="email"]:focus,
+input[type="number"]:focus {
     outline: none;
     border-color: var(--brand);
     box-shadow: 0 0 0 3px var(--focus-ring);

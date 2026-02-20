@@ -1,0 +1,40 @@
+{% extends 'layout.html' %}
+{% block title %} Settings {% endblock %}
+{% block content %}
+<p class="muted">Admin-only mail sender configuration.</p>
+{% if has_error and error_message %}
+<p class="muted">{{ error_message }}</p>
+{% endif %}
+{% if has_success and success_message %}
+<p class="muted">{{ success_message }}</p>
+{% endif %}
+<form method="post" action="/settings" class="plan-form">
+    <p>
+        <label for="smtp_host">SMTP Host</label><br />
+        <input id="smtp_host" name="smtp_host" type="text" value="{{ smtp_host }}" required />
+    </p>
+    <p>
+        <label for="smtp_port">SMTP Port</label><br />
+        <input id="smtp_port" name="smtp_port" type="number" min="1" max="65535" value="{{ smtp_port }}" required />
+    </p>
+    <p>
+        <label for="smtp_username">SMTP Username</label><br />
+        <input id="smtp_username" name="smtp_username" type="text" value="{{ smtp_username }}" />
+    </p>
+    <p>
+        <label for="smtp_password">SMTP Password</label><br />
+        <input id="smtp_password" name="smtp_password" type="password" value="{{ smtp_password }}" />
+    </p>
+    <p>
+        <label for="sender_name">Sender Name</label><br />
+        <input id="sender_name" name="sender_name" type="text" value="{{ sender_name }}" required />
+    </p>
+    <p>
+        <label for="sender_email">Sender Email</label><br />
+        <input id="sender_email" name="sender_email" type="email" value="{{ sender_email }}" required />
+    </p>
+    <div class="toolbar">
+        <input class="btn btn-primary" type="submit" value="Save Settings" />
+    </div>
+</form>
+{% endblock %}

@@ -32,4 +32,17 @@ window.onload = function () {
       this.closest("tr").remove();
     });
   });
+
+  // Copy placeholder helper buttons
+  document.querySelectorAll(".copy-placeholder").forEach((button) => {
+    button.addEventListener("click", function () {
+      const row = this.closest("tr");
+      const codeNode = row ? row.querySelector("code") : null;
+      const value = codeNode ? codeNode.textContent || "" : "";
+      if (!value) {
+        return;
+      }
+      navigator.clipboard.writeText(value);
+    });
+  });
 };

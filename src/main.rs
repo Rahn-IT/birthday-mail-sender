@@ -12,6 +12,8 @@ use serde::Serialize;
 use sqlx::{Sqlite, SqlitePool, migrate::MigrateDatabase};
 
 pub mod error;
+mod mail_template;
+mod settings;
 mod users;
 
 const DB_PATH: &str = "./db/db.sqlite";
@@ -35,6 +37,7 @@ async fn main() {
             .unwrap();
         Sqlite::create_database(DB_PATH).await.unwrap();
     }
+    settings::ensure_settings_file().await.unwrap();
 
     let db = SqlitePool::connect(DB_PATH).await.unwrap();
     sqlx::migrate!("./migrations").run(&db).await.unwrap();
@@ -69,6 +72,9 @@ async fn main() {
 fn router() -> Router<AppState> {
     let admin_routes = Router::new()
         .route("/users", get(users::index).post(users::create_post))
+        .route("/settings", get(settings::index).post(settings::save))
+        .route("/template", get(mail_template::index).post(mail_template::upload))
+        .route("/template/download", get(mail_template::download))
         .route(
             "/users/{id}/delete",
             get(users::delete_get).post(users::delete_post),

@@ -1,0 +1,74 @@
+{% extends 'layout.html' %}
+{% block title %} Template {% endblock %}
+{% block content %}
+<p class="muted">Upload an email template file in .eml format.</p>
+{% if has_error and error_message %}
+<p class="muted">{{ error_message }}</p>
+{% endif %}
+{% if has_success and success_message %}
+<p class="muted">{{ success_message }}</p>
+{% endif %}
+<form method="post" action="/template" class="plan-form" enctype="multipart/form-data">
+    <p>
+        <label for="template_file">Template File (.eml)</label><br />
+        <input id="template_file" name="template_file" type="file" accept=".eml,message/rfc822" required />
+    </p>
+    <div class="toolbar">
+        <input class="btn btn-primary" type="submit" value="Upload Template" />
+        {% if has_template %}
+        <a class="btn" href="/template/download">Download Current Template</a>
+        {% endif %}
+    </div>
+</form>
+
+<h2>Placeholder Check</h2>
+<table class="items-table">
+    <thead>
+        <tr>
+            <th>Placeholder</th>
+            <th>Exists</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for check in placeholder_checks %}
+        <tr>
+            <td><code>{{ check.placeholder }}</code></td>
+            <td>{% if check.exists %}&#10003;{% else %}&#10007;{% endif %}</td>
+            <td class="actions-col">
+                <button
+                    type="button"
+                    class="btn copy-placeholder"
+                >
+                    Copy
+                </button>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<h2>Unknown Placeholders</h2>
+<table class="items-table">
+    <thead>
+        <tr>
+            <th>Placeholder Name</th>
+            <th>Count</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% if unknown_placeholders | length == 0 %}
+        <tr>
+            <td colspan="2">No unknown placeholders found.</td>
+        </tr>
+        {% else %}
+        {% for item in unknown_placeholders %}
+        <tr>
+            <td><code>{{ item.placeholder }}</code></td>
+            <td>{{ item.count }}</td>
+        </tr>
+        {% endfor %}
+        {% endif %}
+    </tbody>
+</table>
+{% endblock %}
