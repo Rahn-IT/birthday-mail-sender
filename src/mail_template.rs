@@ -12,6 +12,7 @@ use crate::{AppState, error::AppError, users::CurrentUser};
 
 const TEMPLATE_PATH: &str = "./db/template.eml";
 const KNOWN_PLACEHOLDER_NAMES: &[&str] = &["first_name", "last_name", "greeting"];
+const ALLOWED_TEMPLATE_HEADERS: &[&str] = &["subject", "content-type"];
 
 #[derive(Debug, Serialize)]
 struct TemplateView {
@@ -110,7 +111,8 @@ pub async fn upload(
             .parent()
             .ok_or_else(|| AppError::internal(anyhow::anyhow!("Invalid template path.")))?;
         tokio::fs::create_dir_all(parent).await?;
-        tokio::fs::write(TEMPLATE_PATH, data).await?;
+        let sanitized = sanitize_eml_headers(&data);
+        tokio::fs::write(TEMPLATE_PATH, sanitized).await?;
         uploaded = true;
         break;
     }
@@ -314,4 +316,110 @@ fn locate_any_placeholder(content: &[u8], from: usize) -> Option<PlaceholderSpan
     }
 
     None
+}
+
+fn sanitize_eml_headers(raw: &[u8]) -> Vec<u8> {
+    let (header_end, newline) = match find_header_end(raw) {
+        Some(value) => value,
+        None => return raw.to_vec(),
+    };
+
+    let header_bytes = &raw[..header_end];
+    let body_start = header_end + newline.len() * 2;
+    let body_bytes = if body_start <= raw.len() {
+        &raw[body_start..]
+    } else {
+        &[]
+    };
+
+    let mut kept_lines: Vec<Vec<u8>> = Vec::new();
+    let mut keep_current_header = false;
+
+    for line in iter_lines(header_bytes, newline) {
+        if line.is_empty() {
+            continue;
+        }
+
+        let is_continuation = matches!(line.first(), Some(b' ' | b'\t'));
+        if is_continuation {
+            if keep_current_header {
+                kept_lines.push(line.to_vec());
+            }
+            continue;
+        }
+
+        keep_current_header = header_name(line)
+            .map(|name| {
+                let lower = name.to_ascii_lowercase();
+                ALLOWED_TEMPLATE_HEADERS
+                    .iter()
+                    .any(|allowed| lower == allowed.as_bytes())
+            })
+            .unwrap_or(false);
+
+        if keep_current_header {
+            kept_lines.push(line.to_vec());
+        }
+    }
+
+    let mut out = Vec::new();
+    for line in kept_lines {
+        out.extend_from_slice(&line);
+        out.extend_from_slice(newline);
+    }
+    out.extend_from_slice(newline);
+    out.extend_from_slice(newline);
+    out.extend_from_slice(body_bytes);
+    out
+}
+
+fn find_header_end(raw: &[u8]) -> Option<(usize, &'static [u8])> {
+    if let Some(pos) = find_subslice(raw, b"\r\n\r\n") {
+        return Some((pos, b"\r\n"));
+    }
+    if let Some(pos) = find_subslice(raw, b"\n\n") {
+        return Some((pos, b"\n"));
+    }
+    None
+}
+
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|window| window == needle)
+}
+
+fn iter_lines<'a>(data: &'a [u8], newline: &[u8]) -> Vec<&'a [u8]> {
+    let mut lines = Vec::new();
+    let mut pos = 0;
+
+    while pos < data.len() {
+        if let Some(rel_end) = find_subslice(&data[pos..], newline) {
+            let end = pos + rel_end;
+            lines.push(&data[pos..end]);
+            pos = end + newline.len();
+        } else {
+            lines.push(&data[pos..]);
+            break;
+        }
+    }
+
+    lines
+}
+
+fn header_name(line: &[u8]) -> Option<&[u8]> {
+    let colon = line.iter().position(|b| *b == b':')?;
+    Some(trim_ascii_bytes(&line[..colon]))
+}
+
+fn trim_ascii_bytes(bytes: &[u8]) -> &[u8] {
+    let mut start = 0;
+    let mut end = bytes.len();
+
+    while start < end && bytes[start].is_ascii_whitespace() {
+        start += 1;
+    }
+    while end > start && bytes[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+
+    &bytes[start..end]
 }
