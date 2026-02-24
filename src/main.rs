@@ -73,6 +73,7 @@ fn router() -> Router<AppState> {
     let admin_routes = Router::new()
         .route("/users", get(users::index).post(users::create_post))
         .route("/settings", get(settings::index).post(settings::save))
+        .route("/settings/test-mail", post(settings::send_test_mail))
         .route("/template", get(mail_template::index).post(mail_template::upload))
         .route("/template/download", get(mail_template::download))
         .route(

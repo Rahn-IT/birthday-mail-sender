@@ -288,7 +288,8 @@ a:hover {
 input[type="text"],
 input[type="password"],
 input[type="email"],
-input[type="number"] {
+input[type="number"],
+select {
     width: 100%;
     border: 1px solid var(--input-line);
     border-radius: 10px;
@@ -301,7 +302,8 @@ input[type="number"] {
 input[type="text"]:focus,
 input[type="password"]:focus,
 input[type="email"]:focus,
-input[type="number"]:focus {
+input[type="number"]:focus,
+select:focus {
     outline: none;
     border-color: var(--brand);
     box-shadow: 0 0 0 3px var(--focus-ring);

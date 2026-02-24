@@ -5,11 +5,18 @@ use axum::{
     response::Html,
 };
 use axum_extra::extract::Form;
+use lettre::{
+    AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
+    transport::smtp::authentication::Credentials,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{AppState, error::AppError, users::CurrentUser};
 
 const SETTINGS_PATH: &str = "./db/settings.json";
+const TLS_MODE_STARTTLS: &str = "starttls";
+const TLS_MODE_SMTPS: &str = "smtps";
+const TLS_MODE_NONE: &str = "none";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -19,6 +26,8 @@ pub struct AppSettings {
     pub smtp_password: String,
     pub sender_name: String,
     pub sender_email: String,
+    #[serde(default = "default_tls_mode")]
+    pub tls_mode: String,
 }
 
 impl Default for AppSettings {
@@ -30,6 +39,7 @@ impl Default for AppSettings {
             smtp_password: String::new(),
             sender_name: String::new(),
             sender_email: String::new(),
+            tls_mode: default_tls_mode(),
         }
     }
 }
@@ -42,6 +52,12 @@ pub struct SettingsForm {
     smtp_password: String,
     sender_name: String,
     sender_email: String,
+    tls_mode: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TestMailForm {
+    test_recipient_email: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -57,6 +73,8 @@ struct SettingsView {
     smtp_password: String,
     sender_name: String,
     sender_email: String,
+    tls_mode: String,
+    test_recipient_email: String,
 }
 
 pub async fn index(
@@ -70,6 +88,7 @@ pub async fn index(
         settings,
         None,
         Some("Settings loaded."),
+        String::new(),
     )
 }
 
@@ -83,6 +102,18 @@ pub async fn save(
     let smtp_password = form.smtp_password.trim().to_string();
     let sender_name = form.sender_name.trim().to_string();
     let sender_email = form.sender_email.trim().to_string();
+    let tls_mode = match normalize_tls_mode(&form.tls_mode) {
+        Some(mode) => mode.to_string(),
+        None => {
+            return render_settings_from_form(
+                &state,
+                &current_user,
+                form,
+                Some("TLS mode must be one of: STARTTLS, SMTPS, None."),
+                None,
+            );
+        }
+    };
 
     if smtp_host.is_empty() {
         return render_settings_from_form(
@@ -134,6 +165,7 @@ pub async fn save(
         smtp_password,
         sender_name,
         sender_email,
+        tls_mode,
     };
 
     save_settings(&settings).await?;
@@ -143,7 +175,89 @@ pub async fn save(
         settings,
         None,
         Some("Settings saved."),
+        String::new(),
     )
+}
+
+pub async fn send_test_mail(
+    State(state): State<AppState>,
+    current_user: CurrentUser,
+    Form(form): Form<TestMailForm>,
+) -> Result<Html<String>, AppError> {
+    let settings = load_settings().await?;
+    let test_recipient_email = form.test_recipient_email.trim().to_string();
+    let result: Result<(), String> = if settings.smtp_host.trim().is_empty() {
+        Err("Save SMTP settings first.".to_string())
+    } else if settings.sender_name.trim().is_empty() {
+        Err("Sender name cannot be empty.".to_string())
+    } else if settings.sender_email.trim().is_empty() || !settings.sender_email.contains('@') {
+        Err("Sender email must be a valid email address.".to_string())
+    } else if test_recipient_email.is_empty() || !test_recipient_email.contains('@') {
+        Err("Test recipient must be a valid email address.".to_string())
+    } else {
+        send_test_mail_via_smtp(&settings, &test_recipient_email)
+            .await
+            .map_err(|err| {
+                format!(
+                    "Test email could not be sent. Check SMTP host/port, TLS mode, username and password. Server response: {}",
+                    err
+                )
+            })
+    };
+
+    match result {
+        Ok(()) => render_settings(
+            &state,
+            &current_user,
+            settings,
+            None,
+            Some("Test email sent."),
+            test_recipient_email,
+        ),
+        Err(error_message) => render_settings(
+            &state,
+            &current_user,
+            settings,
+            Some(&error_message),
+            None,
+            test_recipient_email,
+        ),
+    }
+}
+
+async fn send_test_mail_via_smtp(
+    settings: &AppSettings,
+    test_recipient_email: &str,
+) -> Result<(), AppError> {
+    let sender_mailbox = format!("{} <{}>", settings.sender_name, settings.sender_email).parse()?;
+    let recipient_mailbox = test_recipient_email.parse()?;
+    let message = Message::builder()
+        .from(sender_mailbox)
+        .to(recipient_mailbox)
+        .subject("SMTP Test Email")
+        .body("This is a test email from birthday-mail-sender.".to_string())?;
+
+    let tls_mode = normalize_tls_mode(&settings.tls_mode).unwrap_or(TLS_MODE_STARTTLS);
+    let mut smtp_builder = match tls_mode {
+        TLS_MODE_STARTTLS => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&settings.smtp_host)?,
+        TLS_MODE_SMTPS => AsyncSmtpTransport::<Tokio1Executor>::relay(&settings.smtp_host)?,
+        TLS_MODE_NONE => {
+            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(settings.smtp_host.clone())
+        }
+        _ => unreachable!("unsupported TLS mode"),
+    }
+    .port(settings.smtp_port);
+
+    if !settings.smtp_username.is_empty() {
+        smtp_builder = smtp_builder.credentials(Credentials::new(
+            settings.smtp_username.clone(),
+            settings.smtp_password.clone(),
+        ));
+    }
+
+    let smtp = smtp_builder.build();
+    smtp.send(message).await?;
+    Ok(())
 }
 
 pub async fn ensure_settings_file() -> Result<(), AppError> {
@@ -193,8 +307,16 @@ fn render_settings_from_form(
         smtp_password: form.smtp_password,
         sender_name: form.sender_name,
         sender_email: form.sender_email,
+        tls_mode: form.tls_mode,
     };
-    render_settings(state, current_user, settings, error_message, success_message)
+    render_settings(
+        state,
+        current_user,
+        settings,
+        error_message,
+        success_message,
+        String::new(),
+    )
 }
 
 fn render_settings(
@@ -203,6 +325,7 @@ fn render_settings(
     settings: AppSettings,
     error_message: Option<&str>,
     success_message: Option<&str>,
+    test_recipient_email: String,
 ) -> Result<Html<String>, AppError> {
     let template = state
         .jinja
@@ -220,6 +343,23 @@ fn render_settings(
         smtp_password: settings.smtp_password,
         sender_name: settings.sender_name,
         sender_email: settings.sender_email,
+        tls_mode: normalize_tls_mode(&settings.tls_mode)
+            .unwrap_or(TLS_MODE_STARTTLS)
+            .to_string(),
+        test_recipient_email,
     })?;
     Ok(Html(rendered))
+}
+
+fn default_tls_mode() -> String {
+    TLS_MODE_STARTTLS.to_string()
+}
+
+fn normalize_tls_mode(tls_mode: &str) -> Option<&'static str> {
+    match tls_mode.trim().to_ascii_lowercase().as_str() {
+        TLS_MODE_STARTTLS => Some(TLS_MODE_STARTTLS),
+        TLS_MODE_SMTPS => Some(TLS_MODE_SMTPS),
+        TLS_MODE_NONE => Some(TLS_MODE_NONE),
+        _ => None,
+    }
 }

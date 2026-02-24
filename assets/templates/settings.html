@@ -33,8 +33,31 @@
         <label for="sender_email">Sender Email</label><br />
         <input id="sender_email" name="sender_email" type="email" value="{{ sender_email }}" required />
     </p>
+    <p>
+        <label for="tls_mode">TLS Mode</label><br />
+        <select id="tls_mode" name="tls_mode" required>
+            <option value="starttls"{% if tls_mode == "starttls" %} selected{% endif %}>STARTTLS</option>
+            <option value="smtps"{% if tls_mode == "smtps" %} selected{% endif %}>SMTPS (Implicit TLS)</option>
+            <option value="none"{% if tls_mode == "none" %} selected{% endif %}>None (Plain SMTP)</option>
+        </select>
+    </p>
     <div class="toolbar">
         <input class="btn btn-primary" type="submit" value="Save Settings" />
+    </div>
+</form>
+<form method="post" action="/settings/test-mail" class="plan-form">
+    <p>
+        <label for="test_recipient_email">Test Recipient</label><br />
+        <input
+            id="test_recipient_email"
+            name="test_recipient_email"
+            type="email"
+            value="{{ test_recipient_email }}"
+            required
+        />
+    </p>
+    <div class="toolbar">
+        <input class="btn" type="submit" value="Send Test Email" />
     </div>
 </form>
 {% endblock %}
