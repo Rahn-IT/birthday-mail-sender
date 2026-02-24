@@ -6,9 +6,11 @@ use axum::{
     http::{HeaderValue, header},
     response::{Html, IntoResponse},
 };
+use axum_extra::extract::Form;
+use serde::Deserialize;
 use serde::Serialize;
 
-use crate::{AppState, error::AppError, users::CurrentUser};
+use crate::{AppState, error::AppError, placeholders, template_mailer, users::CurrentUser};
 
 const TEMPLATE_PATH: &str = "./db/template.eml";
 const KNOWN_PLACEHOLDER_NAMES: &[&str] = &["first_name", "last_name", "greeting"];
@@ -22,8 +24,14 @@ struct TemplateView {
     has_success: bool,
     success_message: Option<String>,
     has_template: bool,
+    test_recipient_email: String,
     placeholder_checks: Vec<PlaceholderCheck>,
     unknown_placeholders: Vec<UnknownPlaceholder>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TemplateTestMailForm {
+    test_recipient_email: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -62,6 +70,7 @@ pub async fn index(
         inspection.unknown,
         None,
         Some("Upload a .eml file to replace the current template."),
+        String::new(),
     )
 }
 
@@ -89,6 +98,7 @@ pub async fn upload(
                 inspection.unknown,
                 Some("Only .eml files are allowed."),
                 None,
+                String::new(),
             );
         }
 
@@ -104,6 +114,7 @@ pub async fn upload(
                 inspection.unknown,
                 Some("Uploaded file is empty."),
                 None,
+                String::new(),
             );
         }
 
@@ -128,6 +139,7 @@ pub async fn upload(
             inspection.unknown,
             Some("Please choose a .eml file to upload."),
             None,
+            String::new(),
         );
     }
 
@@ -143,7 +155,68 @@ pub async fn upload(
         inspection.unknown,
         None,
         Some("Template uploaded."),
+        String::new(),
     )
+}
+
+pub async fn send_test_mail(
+    State(state): State<AppState>,
+    current_user: CurrentUser,
+    Form(form): Form<TemplateTestMailForm>,
+) -> Result<Html<String>, AppError> {
+    let recipient_email = form.test_recipient_email.trim().to_string();
+    let has_template = tokio::fs::try_exists(TEMPLATE_PATH).await?;
+    let inspection = load_placeholder_inspection_if_exists(has_template).await?;
+    let send_result = try_send_template_test_mail(has_template, &recipient_email).await;
+
+    match send_result {
+        Ok(()) => render_template_page(
+            &state,
+            &current_user,
+            has_template,
+            inspection.checks,
+            inspection.unknown,
+            None,
+            Some("Template test email sent."),
+            recipient_email,
+        ),
+        Err(error_message) => render_template_page(
+            &state,
+            &current_user,
+            has_template,
+            inspection.checks,
+            inspection.unknown,
+            Some(&error_message),
+            None,
+            recipient_email,
+        ),
+    }
+}
+
+async fn try_send_template_test_mail(
+    has_template: bool,
+    recipient_email: &str,
+) -> Result<(), String> {
+    if !has_template {
+        return Err("Upload a template before sending a template test email.".to_string());
+    }
+
+    if recipient_email.is_empty() || !recipient_email.contains('@') {
+        return Err("Test recipient must be a valid email address.".to_string());
+    }
+
+    let template_bytes = tokio::fs::read(TEMPLATE_PATH)
+        .await
+        .map_err(|err| format!("Could not read template file: {}", err))?;
+
+    template_mailer::send_template_test_mail_with_loaded_settings(&template_bytes, recipient_email)
+        .await
+        .map_err(|err| {
+            format!(
+                "Template test email could not be sent. Check template headers/body and SMTP settings. Server response: {}",
+                err
+            )
+        })
 }
 
 pub async fn download(current_user: CurrentUser) -> Result<impl IntoResponse, AppError> {
@@ -180,6 +253,7 @@ fn render_template_page(
     unknown_placeholders: Vec<UnknownPlaceholder>,
     error_message: Option<&str>,
     success_message: Option<&str>,
+    test_recipient_email: String,
 ) -> Result<Html<String>, AppError> {
     let template = state
         .jinja
@@ -192,6 +266,7 @@ fn render_template_page(
         has_success: success_message.is_some(),
         success_message: success_message.map(str::to_string),
         has_template,
+        test_recipient_email,
         placeholder_checks,
         unknown_placeholders,
     })?;
@@ -225,7 +300,7 @@ fn build_unknown_placeholders(data: &[u8]) -> Vec<UnknownPlaceholder> {
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
 
     let mut offset = 0;
-    while let Some(found) = locate_any_placeholder(data, offset) {
+    while let Some(found) = placeholders::locate_any_placeholder(data, offset) {
         if !is_known_placeholder_name(&found.name) {
             let name = String::from_utf8_lossy(&found.name).to_string();
             *counts.entry(name).or_insert(0) += 1;
@@ -246,76 +321,7 @@ fn is_known_placeholder_name(name: &[u8]) -> bool {
 }
 
 fn locate_placeholders(content: &[u8], name: &[u8]) -> Vec<(usize, usize)> {
-    if name.is_empty() || content.len() < 4 {
-        return Vec::new();
-    }
-
-    let mut matches: Vec<(usize, usize)> = Vec::new();
-    let mut offset = 0;
-    while let Some(found) = locate_any_placeholder(content, offset) {
-        if found.name.as_slice() == name {
-            matches.push((found.start, found.end));
-        }
-        offset = found.end;
-    }
-
-    matches
-}
-
-struct PlaceholderSpan {
-    name: Vec<u8>,
-    start: usize,
-    end: usize,
-}
-
-fn locate_any_placeholder(content: &[u8], from: usize) -> Option<PlaceholderSpan> {
-    if content.len() < 4 || from >= content.len() {
-        return None;
-    }
-
-    let mut i = from;
-    while i + 1 < content.len() {
-        if content[i] != b'{' || content[i + 1] != b'{' {
-            i += 1;
-            continue;
-        }
-
-        let mut j = i + 2;
-        while j < content.len() && content[j].is_ascii_whitespace() {
-            j += 1;
-        }
-
-        let name_start = j;
-        while j < content.len()
-            && !content[j].is_ascii_whitespace()
-            && content[j] != b'}'
-            && content[j] != b'{'
-        {
-            j += 1;
-        }
-        let name_end = j;
-
-        if name_start == name_end {
-            i += 1;
-            continue;
-        }
-
-        while j < content.len() && content[j].is_ascii_whitespace() {
-            j += 1;
-        }
-
-        if j + 1 < content.len() && content[j] == b'}' && content[j + 1] == b'}' {
-            return Some(PlaceholderSpan {
-                name: content[name_start..name_end].to_vec(),
-                start: i,
-                end: j + 2,
-            });
-        }
-
-        i += 1;
-    }
-
-    None
+    placeholders::locate_placeholders(content, name)
 }
 
 fn sanitize_eml_headers(raw: &[u8]) -> Vec<u8> {

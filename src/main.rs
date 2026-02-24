@@ -13,7 +13,10 @@ use sqlx::{Sqlite, SqlitePool, migrate::MigrateDatabase};
 
 pub mod error;
 mod mail_template;
+mod placeholders;
+mod send_mail;
 mod settings;
+mod template_mailer;
 mod users;
 
 const DB_PATH: &str = "./db/db.sqlite";
@@ -75,6 +78,7 @@ fn router() -> Router<AppState> {
         .route("/settings", get(settings::index).post(settings::save))
         .route("/settings/test-mail", post(settings::send_test_mail))
         .route("/template", get(mail_template::index).post(mail_template::upload))
+        .route("/template/test-mail", post(mail_template::send_test_mail))
         .route("/template/download", get(mail_template::download))
         .route(
             "/users/{id}/delete",

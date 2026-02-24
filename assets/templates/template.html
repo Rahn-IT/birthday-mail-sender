@@ -20,6 +20,21 @@
         {% endif %}
     </div>
 </form>
+<form method="post" action="/template/test-mail" class="plan-form">
+    <p>
+        <label for="test_recipient_email">Template Test Recipient</label><br />
+        <input
+            id="test_recipient_email"
+            name="test_recipient_email"
+            type="email"
+            value="{{ test_recipient_email }}"
+            required
+        />
+    </p>
+    <div class="toolbar">
+        <input class="btn" type="submit" value="Send Template Test Email" />
+    </div>
+</form>
 
 <h2>Placeholder Check</h2>
 <table class="items-table">

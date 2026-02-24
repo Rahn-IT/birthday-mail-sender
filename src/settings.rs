@@ -5,13 +5,9 @@ use axum::{
     response::Html,
 };
 use axum_extra::extract::Form;
-use lettre::{
-    AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
-    transport::smtp::authentication::Credentials,
-};
 use serde::{Deserialize, Serialize};
 
-use crate::{AppState, error::AppError, users::CurrentUser};
+use crate::{AppState, error::AppError, send_mail, users::CurrentUser};
 
 const SETTINGS_PATH: &str = "./db/settings.json";
 const TLS_MODE_STARTTLS: &str = "starttls";
@@ -195,14 +191,19 @@ pub async fn send_test_mail(
     } else if test_recipient_email.is_empty() || !test_recipient_email.contains('@') {
         Err("Test recipient must be a valid email address.".to_string())
     } else {
-        send_test_mail_via_smtp(&settings, &test_recipient_email)
-            .await
-            .map_err(|err| {
-                format!(
-                    "Test email could not be sent. Check SMTP host/port, TLS mode, username and password. Server response: {}",
-                    err
-                )
-            })
+        send_mail::send_mail(
+            &test_recipient_email,
+            "This is a test email from birthday-mail-sender.",
+            "text/plain; charset=utf-8",
+            "SMTP Test Email",
+        )
+        .await
+        .map_err(|err| {
+            format!(
+                "Test email could not be sent. Check SMTP host/port, TLS mode, username and password. Server response: {}",
+                err
+            )
+        })
     };
 
     match result {
@@ -225,41 +226,6 @@ pub async fn send_test_mail(
     }
 }
 
-async fn send_test_mail_via_smtp(
-    settings: &AppSettings,
-    test_recipient_email: &str,
-) -> Result<(), AppError> {
-    let sender_mailbox = format!("{} <{}>", settings.sender_name, settings.sender_email).parse()?;
-    let recipient_mailbox = test_recipient_email.parse()?;
-    let message = Message::builder()
-        .from(sender_mailbox)
-        .to(recipient_mailbox)
-        .subject("SMTP Test Email")
-        .body("This is a test email from birthday-mail-sender.".to_string())?;
-
-    let tls_mode = normalize_tls_mode(&settings.tls_mode).unwrap_or(TLS_MODE_STARTTLS);
-    let mut smtp_builder = match tls_mode {
-        TLS_MODE_STARTTLS => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&settings.smtp_host)?,
-        TLS_MODE_SMTPS => AsyncSmtpTransport::<Tokio1Executor>::relay(&settings.smtp_host)?,
-        TLS_MODE_NONE => {
-            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(settings.smtp_host.clone())
-        }
-        _ => unreachable!("unsupported TLS mode"),
-    }
-    .port(settings.smtp_port);
-
-    if !settings.smtp_username.is_empty() {
-        smtp_builder = smtp_builder.credentials(Credentials::new(
-            settings.smtp_username.clone(),
-            settings.smtp_password.clone(),
-        ));
-    }
-
-    let smtp = smtp_builder.build();
-    smtp.send(message).await?;
-    Ok(())
-}
-
 pub async fn ensure_settings_file() -> Result<(), AppError> {
     if tokio::fs::try_exists(SETTINGS_PATH).await? {
         return Ok(());
@@ -268,7 +234,7 @@ pub async fn ensure_settings_file() -> Result<(), AppError> {
     save_settings(&AppSettings::default()).await
 }
 
-async fn load_settings() -> Result<AppSettings, AppError> {
+pub(crate) async fn load_settings() -> Result<AppSettings, AppError> {
     if !tokio::fs::try_exists(SETTINGS_PATH).await? {
         return Ok(AppSettings::default());
     }
