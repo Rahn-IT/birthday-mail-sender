@@ -1,0 +1,38 @@
+{% extends 'layout.html' %}
+{% block title %}People{% endblock %}
+{% block top_actions %}
+<a class="btn btn-primary" href="/people/new">Add User</a>
+{% endblock %}
+{% block content %}
+<p class="muted">Manage the user records used for mail merges and future birthday logic.</p>
+<table class="items-table">
+    <thead>
+        <tr>
+            <th>First Name</th>
+            <th>Last Name</th>
+            <th>Greeting</th>
+            <th>Email</th>
+            <th>Birthday</th>
+            <th>Start Year</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% if people | length == 0 %}
+        <tr>
+            <td colspan="6">No users added yet.</td>
+        </tr>
+        {% else %}
+        {% for person in people %}
+        <tr class="clickable-row" data-href="/people/{{ person.id }}" tabindex="0">
+            <td>{{ person.first_name }}</td>
+            <td>{{ person.last_name }}</td>
+            <td>{{ person.greeting }}</td>
+            <td>{{ person.email }}</td>
+            <td>{{ person.birthday }}</td>
+            <td>{{ person.start_year }}</td>
+        </tr>
+        {% endfor %}
+        {% endif %}
+    </tbody>
+</table>
+{% endblock %}

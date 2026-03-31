@@ -1,0 +1,16 @@
+{% extends 'layout.html' %}
+{% block title %}User{% endblock %}
+{% block top_actions %}
+<a class="btn" href="/people">Back to Users</a>
+<a class="btn btn-primary" href="/people/edit/{{ person.id }}">Edit User</a>
+{% endblock %}
+{% block content %}
+<div class="details-card">
+    <p><strong>First Name:</strong> {{ person.first_name }}</p>
+    <p><strong>Last Name:</strong> {{ person.last_name }}</p>
+    <p><strong>Greeting:</strong> {{ person.greeting }}</p>
+    <p><strong>Email:</strong> {{ person.email }}</p>
+    <p><strong>Birthday:</strong> {{ person.birthday }}</p>
+    <p><strong>Start Year:</strong> {{ person.start_year }}</p>
+</div>
+{% endblock %}

@@ -45,4 +45,23 @@ window.onload = function () {
       navigator.clipboard.writeText(value);
     });
   });
+
+  // Clickable table rows
+  document.querySelectorAll(".clickable-row").forEach((row) => {
+    const href = row.getAttribute("data-href");
+    if (!href) {
+      return;
+    }
+
+    row.addEventListener("click", function () {
+      window.location.href = href;
+    });
+
+    row.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        window.location.href = href;
+      }
+    });
+  });
 };

@@ -14,6 +14,7 @@ use sqlx::{Sqlite, SqlitePool, migrate::MigrateDatabase};
 pub mod error;
 mod mail_template;
 mod placeholders;
+mod people;
 mod send_mail;
 mod settings;
 mod template_mailer;
@@ -73,6 +74,15 @@ async fn main() {
 }
 
 fn router() -> Router<AppState> {
+    let people_routes = Router::new()
+        .route("/people", get(people::index))
+        .route("/people/new", get(people::create_get).post(people::create_post))
+        .route(
+            "/people/edit/{id}",
+            get(people::edit_get).post(people::edit_post),
+        )
+        .route("/people/{id}", get(people::show));
+
     let admin_routes = Router::new()
         .route("/users", get(users::index).post(users::create_post))
         .route("/settings", get(settings::index).post(settings::save))
@@ -115,6 +125,7 @@ fn router() -> Router<AppState> {
                 include_bytes!("../assets/static/script.js"),
             )),
         )
+        .merge(people_routes)
         .merge(admin_routes)
 }
 

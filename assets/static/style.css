@@ -279,6 +279,15 @@ a:hover {
     border-bottom: none;
 }
 
+.clickable-row {
+    cursor: pointer;
+}
+
+.clickable-row:hover td,
+.clickable-row:focus td {
+    background: var(--hover-bg);
+}
+
 .plan-form label {
     display: inline-block;
     margin-bottom: 0.4rem;
