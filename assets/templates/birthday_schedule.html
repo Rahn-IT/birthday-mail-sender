@@ -29,7 +29,7 @@
             <td>{{ entry.full_name }}</td>
             <td>{{ entry.email }}</td>
             <td>{% if entry.has_been_sent %}Sent{% else %}Pending{% endif %}</td>
-            <td>{% if entry.last_sent_at %}{{ entry.last_sent_at }}{% else %}-{% endif %}</td>
+            <td>{% if entry.sent_at_display %}{{ entry.sent_at_display }}{% else %}-{% endif %}</td>
         </tr>
         {% endfor %}
         {% endif %}

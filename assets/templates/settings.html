@@ -38,14 +38,12 @@
         <input id="send_for_years" name="send_for_years" type="number" min="0" value="{{ send_for_years }}" required />
     </p>
     <p>
-        <label for="schedule_at_utc_hour">Schedule At UTC Hour</label><br />
+        <label for="schedule_at_local_time">Schedule At Local Time</label><br />
         <input
-            id="schedule_at_utc_hour"
-            name="schedule_at_utc_hour"
-            type="number"
-            min="0"
-            max="23"
-            value="{{ schedule_at_utc_hour }}"
+            id="schedule_at_local_time"
+            name="schedule_at_local_time"
+            type="time"
+            value="{{ schedule_at_local_time }}"
             required
         />
     </p>

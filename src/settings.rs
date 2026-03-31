@@ -5,6 +5,7 @@ use axum::{
     response::Html,
 };
 use axum_extra::extract::Form;
+use chrono::NaiveTime;
 use serde::{Deserialize, Serialize};
 
 use crate::{AppState, error::AppError, send_mail, users::CurrentUser};
@@ -24,8 +25,8 @@ pub struct AppSettings {
     pub sender_email: String,
     #[serde(default = "default_send_for_years")]
     pub send_for_years: i64,
-    #[serde(default = "default_schedule_at_utc_hour")]
-    pub schedule_at_utc_hour: i64,
+    #[serde(default = "default_schedule_at_local_time")]
+    pub schedule_at_local_time: String,
     #[serde(default = "default_tls_mode")]
     pub tls_mode: String,
 }
@@ -40,7 +41,7 @@ impl Default for AppSettings {
             sender_name: String::new(),
             sender_email: String::new(),
             send_for_years: default_send_for_years(),
-            schedule_at_utc_hour: default_schedule_at_utc_hour(),
+            schedule_at_local_time: default_schedule_at_local_time(),
             tls_mode: default_tls_mode(),
         }
     }
@@ -55,7 +56,7 @@ pub struct SettingsForm {
     sender_name: String,
     sender_email: String,
     send_for_years: String,
-    schedule_at_utc_hour: String,
+    schedule_at_local_time: String,
     tls_mode: String,
 }
 
@@ -78,7 +79,7 @@ struct SettingsView {
     sender_name: String,
     sender_email: String,
     send_for_years: i64,
-    schedule_at_utc_hour: i64,
+    schedule_at_local_time: String,
     tls_mode: String,
     test_recipient_email: String,
 }
@@ -120,14 +121,14 @@ pub async fn save(
             );
         }
     };
-    let schedule_at_utc_hour = match form.schedule_at_utc_hour.trim().parse::<i64>() {
-        Ok(value) if (0..=23).contains(&value) => value,
-        _ => {
+    let schedule_at_local_time = match parse_schedule_at_local_time(&form.schedule_at_local_time) {
+        Some(value) => value,
+        None => {
             return render_settings_from_form(
                 &state,
                 &current_user,
                 form,
-                Some("Schedule at UTC hour must be a valid number from 0 to 23."),
+                Some("Schedule at local time must use HH:MM in 24-hour format."),
                 None,
             );
         }
@@ -196,7 +197,7 @@ pub async fn save(
         sender_name,
         sender_email,
         send_for_years,
-        schedule_at_utc_hour,
+        schedule_at_local_time,
         tls_mode,
     };
 
@@ -310,7 +311,8 @@ fn render_settings_from_form(
         sender_name: form.sender_name,
         sender_email: form.sender_email,
         send_for_years: form.send_for_years.trim().parse::<i64>().unwrap_or(default_send_for_years()),
-        schedule_at_utc_hour: form.schedule_at_utc_hour.trim().parse::<i64>().unwrap_or(default_schedule_at_utc_hour()),
+        schedule_at_local_time: parse_schedule_at_local_time(&form.schedule_at_local_time)
+            .unwrap_or_else(default_schedule_at_local_time),
         tls_mode: form.tls_mode,
     };
     render_settings(
@@ -348,7 +350,7 @@ fn render_settings(
         sender_name: settings.sender_name,
         sender_email: settings.sender_email,
         send_for_years: settings.send_for_years,
-        schedule_at_utc_hour: settings.schedule_at_utc_hour,
+        schedule_at_local_time: settings.schedule_at_local_time,
         tls_mode: normalize_tls_mode(&settings.tls_mode)
             .unwrap_or(TLS_MODE_STARTTLS)
             .to_string(),
@@ -365,8 +367,14 @@ fn default_send_for_years() -> i64 {
     1
 }
 
-fn default_schedule_at_utc_hour() -> i64 {
-    9
+fn default_schedule_at_local_time() -> String {
+    "09:00".to_string()
+}
+
+fn parse_schedule_at_local_time(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    let parsed = NaiveTime::parse_from_str(trimmed, "%H:%M").ok()?;
+    Some(parsed.format("%H:%M").to_string())
 }
 
 fn normalize_tls_mode(tls_mode: &str) -> Option<&'static str> {

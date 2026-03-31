@@ -1,11 +1,14 @@
-use axum::{extract::State, response::{Html, Redirect}};
+use axum::{
+    extract::State,
+    response::{Html, Redirect},
+};
+use chrono::{DateTime, Datelike, Local, NaiveTime, Timelike, Utc};
 use serde::Serialize;
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::{
-    AppState, error::AppError,
-    settings,
+    AppState, error::AppError, settings,
     template_mailer::{self, TemplateValues},
     users::CurrentUser,
 };
@@ -35,7 +38,7 @@ struct BirthdayScheduleItemView {
     full_name: String,
     email: String,
     has_been_sent: bool,
-    last_sent_at: Option<i64>,
+    sent_at_display: Option<String>,
 }
 
 pub async fn index(
@@ -46,12 +49,7 @@ pub async fn index(
     let recipients = if settings.send_for_years <= 0 {
         Vec::new()
     } else {
-        load_scheduled_recipients(
-            &state.db,
-            settings.send_for_years,
-            settings.schedule_at_utc_hour,
-        )
-        .await?
+        load_scheduled_recipients(&state.db, settings.send_for_years).await?
     };
     let recent_threshold = unix_now().saturating_sub(RECENT_SEND_WINDOW_SECONDS);
     let entries = recipients
@@ -63,7 +61,7 @@ pub async fn index(
             has_been_sent: recipient
                 .last_sent_at
                 .is_some_and(|value| value >= recent_threshold),
-            last_sent_at: recipient.last_sent_at,
+            sent_at_display: recipient.last_sent_at.and_then(format_sent_at_local),
         })
         .collect();
 
@@ -90,12 +88,7 @@ pub async fn send_scheduled_mails(db: &SqlitePool) -> Result<u64, AppError> {
     }
 
     let template_bytes = tokio::fs::read(TEMPLATE_PATH).await?;
-    let recipients = load_scheduled_recipients(
-        db,
-        settings.send_for_years,
-        settings.schedule_at_utc_hour,
-    )
-    .await?;
+    let recipients = load_scheduled_recipients(db, settings.send_for_years).await?;
     let mut sent_count = 0_u64;
     let recent_threshold = unix_now().saturating_sub(RECENT_SEND_WINDOW_SECONDS);
 
@@ -145,7 +138,7 @@ pub async fn run_daily_scheduler(db: SqlitePool) {
                 continue;
             }
         };
-        let sleep_seconds = seconds_until_next_run(settings.schedule_at_utc_hour).max(60);
+        let sleep_seconds = seconds_until_next_run(&settings.schedule_at_local_time).max(60);
 
         tokio::time::sleep(std::time::Duration::from_secs(sleep_seconds as u64)).await;
 
@@ -163,9 +156,11 @@ pub async fn run_daily_scheduler(db: SqlitePool) {
 async fn load_scheduled_recipients(
     db: &SqlitePool,
     send_for_years: i64,
-    schedule_at_utc_hour: i64,
 ) -> Result<Vec<ScheduledRecipient>, AppError> {
-    let shifted_now_modifier = schedule_at_utc_modifier(schedule_at_utc_hour);
+    let now = Local::now();
+    let today_month_day = now.format("%m-%d").to_string();
+    let today_year = now.year();
+
     let recipients = sqlx::query_as!(
         ScheduledRecipient,
         r#"
@@ -178,9 +173,9 @@ async fn load_scheduled_recipients(
             MAX(sent.sent_at) as "last_sent_at?: i64"
         FROM people
         LEFT JOIN sent ON sent.user_id = people.id
-        WHERE strftime('%m-%d', people.birthday) = strftime('%m-%d', 'now', ?)
-            AND CAST(strftime('%Y', 'now', ?) AS INTEGER) >= people.start_year
-            AND CAST(strftime('%Y', 'now', ?) AS INTEGER) < people.start_year + ?
+        WHERE strftime('%m-%d', people.birthday) = ?
+            AND ? >= people.start_year
+            AND ? < people.start_year + ?
         GROUP BY
             people.id,
             people.first_name,
@@ -189,9 +184,9 @@ async fn load_scheduled_recipients(
             people.email
         ORDER BY people.last_name ASC, people.first_name ASC
         "#,
-        shifted_now_modifier,
-        shifted_now_modifier,
-        shifted_now_modifier,
+        today_month_day,
+        today_year,
+        today_year,
         send_for_years
     )
     .fetch_all(db)
@@ -200,9 +195,12 @@ async fn load_scheduled_recipients(
     Ok(recipients)
 }
 
-fn seconds_until_next_run(schedule_at_utc_hour: i64) -> i64 {
-    let now_seconds = unix_now().rem_euclid(24 * 3600);
-    let target_seconds = schedule_at_utc_hour * 3600;
+fn seconds_until_next_run(schedule_at_local_time: &str) -> i64 {
+    let target = NaiveTime::parse_from_str(schedule_at_local_time, "%H:%M")
+        .unwrap_or_else(|_| NaiveTime::from_hms_opt(9, 0, 0).expect("valid default time"));
+    let now = Local::now().time();
+    let now_seconds = now.num_seconds_from_midnight() as i64;
+    let target_seconds = target.num_seconds_from_midnight() as i64;
 
     if now_seconds < target_seconds {
         target_seconds - now_seconds
@@ -218,6 +216,11 @@ fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
-fn schedule_at_utc_modifier(schedule_at_utc_hour: i64) -> String {
-    format!("+{} hours", schedule_at_utc_hour)
+fn format_sent_at_local(timestamp: i64) -> Option<String> {
+    let utc: DateTime<Utc> = DateTime::from_timestamp(timestamp, 0)?;
+    Some(
+        utc.with_timezone(&Local)
+            .format("%Y-%m-%d %H:%M")
+            .to_string(),
+    )
 }
