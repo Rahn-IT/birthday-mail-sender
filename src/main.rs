@@ -66,7 +66,7 @@ async fn main() {
         .with_state(state);
 
     // run our app with hyper, listening globally on port 3000
-    let addr = "0.0.0.0:4040";
+    let addr = "0.0.0.0:4046";
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     println!("Starting webserver on: http://{}", addr);
     axum::serve(listener, app).await.unwrap();
@@ -77,7 +77,10 @@ fn router() -> Router<AppState> {
         .route("/users", get(users::index).post(users::create_post))
         .route("/settings", get(settings::index).post(settings::save))
         .route("/settings/test-mail", post(settings::send_test_mail))
-        .route("/template", get(mail_template::index).post(mail_template::upload))
+        .route(
+            "/template",
+            get(mail_template::index).post(mail_template::upload),
+        )
         .route("/template/test-mail", post(mail_template::send_test_mail))
         .route("/template/download", get(mail_template::download))
         .route(
