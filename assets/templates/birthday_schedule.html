@@ -1,0 +1,31 @@
+{% extends 'layout.html' %}
+{% block title %}Birthday Schedule{% endblock %}
+{% block content %}
+<p class="muted">Birthday mails scheduled for today.</p>
+<table class="items-table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Status</th>
+            <th>Sent</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% if entries | length == 0 %}
+        <tr>
+            <td colspan="4">No birthday mails are scheduled for today.</td>
+        </tr>
+        {% else %}
+        {% for entry in entries %}
+        <tr class="clickable-row" data-href="/people/{{ entry.person_id }}" tabindex="0">
+            <td>{{ entry.full_name }}</td>
+            <td>{{ entry.email }}</td>
+            <td>{% if entry.has_been_sent %}Sent{% else %}Pending{% endif %}</td>
+            <td>{% if entry.last_sent_at %}{{ entry.last_sent_at }}{% else %}-{% endif %}</td>
+        </tr>
+        {% endfor %}
+        {% endif %}
+    </tbody>
+</table>
+{% endblock %}

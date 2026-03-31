@@ -2,22 +2,21 @@ use anyhow::anyhow;
 
 use crate::{error::AppError, placeholders, send_mail};
 
-struct TemplateTestValues<'a> {
-    greeting: &'a str,
-    last_name: &'a str,
-    first_name: &'a str,
+pub struct TemplateValues<'a> {
+    pub greeting: &'a str,
+    pub last_name: &'a str,
+    pub first_name: &'a str,
 }
 
-async fn send_template_test_mail(template_bytes: &[u8], recipient_email: &str) -> Result<(), AppError> {
+async fn send_template_mail(
+    template_bytes: &[u8],
+    recipient_email: &str,
+    values: &TemplateValues<'_>,
+) -> Result<(), AppError> {
     let parsed = parse_template(template_bytes)?;
-    let values = TemplateTestValues {
-        greeting: "Dear Mr.",
-        last_name: "Doe",
-        first_name: "John",
-    };
 
-    let subject = replace_placeholders(&parsed.subject, &values);
-    let body = replace_placeholders(&parsed.body, &values);
+    let subject = replace_placeholders(&parsed.subject, values);
+    let body = replace_placeholders(&parsed.body, values);
 
     let subject = if subject.trim().is_empty() {
         "Template Test Email".to_string()
@@ -33,11 +32,24 @@ async fn send_template_test_mail(template_bytes: &[u8], recipient_email: &str) -
     send_mail::send_mail(recipient_email, &body, &mime_type, &subject).await
 }
 
+pub async fn send_template_mail_with_loaded_settings(
+    template_bytes: &[u8],
+    recipient_email: &str,
+    values: &TemplateValues<'_>,
+) -> Result<(), AppError> {
+    send_template_mail(template_bytes, recipient_email, values).await
+}
+
 pub async fn send_template_test_mail_with_loaded_settings(
     template_bytes: &[u8],
     recipient_email: &str,
 ) -> Result<(), AppError> {
-    send_template_test_mail(template_bytes, recipient_email).await
+    let values = TemplateValues {
+        greeting: "Dear Mr.",
+        last_name: "Doe",
+        first_name: "John",
+    };
+    send_template_mail(template_bytes, recipient_email, &values).await
 }
 
 struct ParsedTemplate {
@@ -114,7 +126,7 @@ fn parse_headers(headers_raw: &str) -> Vec<(String, String)> {
     out
 }
 
-fn replace_placeholders(input: &str, values: &TemplateTestValues<'_>) -> String {
+fn replace_placeholders(input: &str, values: &TemplateValues<'_>) -> String {
     let mut output = String::with_capacity(input.len());
     let bytes = input.as_bytes();
     let mut cursor = 0;

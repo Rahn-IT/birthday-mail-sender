@@ -22,6 +22,8 @@ pub struct AppSettings {
     pub smtp_password: String,
     pub sender_name: String,
     pub sender_email: String,
+    #[serde(default = "default_send_for_years")]
+    pub send_for_years: i64,
     #[serde(default = "default_tls_mode")]
     pub tls_mode: String,
 }
@@ -35,6 +37,7 @@ impl Default for AppSettings {
             smtp_password: String::new(),
             sender_name: String::new(),
             sender_email: String::new(),
+            send_for_years: default_send_for_years(),
             tls_mode: default_tls_mode(),
         }
     }
@@ -48,6 +51,7 @@ pub struct SettingsForm {
     smtp_password: String,
     sender_name: String,
     sender_email: String,
+    send_for_years: String,
     tls_mode: String,
 }
 
@@ -69,6 +73,7 @@ struct SettingsView {
     smtp_password: String,
     sender_name: String,
     sender_email: String,
+    send_for_years: i64,
     tls_mode: String,
     test_recipient_email: String,
 }
@@ -98,6 +103,18 @@ pub async fn save(
     let smtp_password = form.smtp_password.trim().to_string();
     let sender_name = form.sender_name.trim().to_string();
     let sender_email = form.sender_email.trim().to_string();
+    let send_for_years = match form.send_for_years.trim().parse::<i64>() {
+        Ok(value) if value >= 0 => value,
+        _ => {
+            return render_settings_from_form(
+                &state,
+                &current_user,
+                form,
+                Some("Send for years must be a valid number greater than or equal to 0."),
+                None,
+            );
+        }
+    };
     let tls_mode = match normalize_tls_mode(&form.tls_mode) {
         Some(mode) => mode.to_string(),
         None => {
@@ -161,6 +178,7 @@ pub async fn save(
         smtp_password,
         sender_name,
         sender_email,
+        send_for_years,
         tls_mode,
     };
 
@@ -273,6 +291,7 @@ fn render_settings_from_form(
         smtp_password: form.smtp_password,
         sender_name: form.sender_name,
         sender_email: form.sender_email,
+        send_for_years: form.send_for_years.trim().parse::<i64>().unwrap_or(default_send_for_years()),
         tls_mode: form.tls_mode,
     };
     render_settings(
@@ -309,6 +328,7 @@ fn render_settings(
         smtp_password: settings.smtp_password,
         sender_name: settings.sender_name,
         sender_email: settings.sender_email,
+        send_for_years: settings.send_for_years,
         tls_mode: normalize_tls_mode(&settings.tls_mode)
             .unwrap_or(TLS_MODE_STARTTLS)
             .to_string(),
@@ -319,6 +339,10 @@ fn render_settings(
 
 fn default_tls_mode() -> String {
     TLS_MODE_STARTTLS.to_string()
+}
+
+fn default_send_for_years() -> i64 {
+    1
 }
 
 fn normalize_tls_mode(tls_mode: &str) -> Option<&'static str> {

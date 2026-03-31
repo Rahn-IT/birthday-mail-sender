@@ -12,6 +12,7 @@ use serde::Serialize;
 use sqlx::{Sqlite, SqlitePool, migrate::MigrateDatabase};
 
 pub mod error;
+mod birthday_scheduler;
 mod mail_template;
 mod placeholders;
 mod people;
@@ -75,6 +76,7 @@ async fn main() {
 
 fn router() -> Router<AppState> {
     let people_routes = Router::new()
+        .route("/schedule", get(birthday_scheduler::index))
         .route("/people", get(people::index))
         .route("/people/new", get(people::create_get).post(people::create_post))
         .route(

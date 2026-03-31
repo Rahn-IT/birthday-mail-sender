@@ -34,6 +34,10 @@
         <input id="sender_email" name="sender_email" type="email" value="{{ sender_email }}" required />
     </p>
     <p>
+        <label for="send_for_years">Send For Years</label><br />
+        <input id="send_for_years" name="send_for_years" type="number" min="0" value="{{ send_for_years }}" required />
+    </p>
+    <p>
         <label for="tls_mode">TLS Mode</label><br />
         <select id="tls_mode" name="tls_mode" required>
             <option value="starttls"{% if tls_mode == "starttls" %} selected{% endif %}>STARTTLS</option>
