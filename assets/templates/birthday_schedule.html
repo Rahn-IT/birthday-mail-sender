@@ -1,5 +1,12 @@
 {% extends 'layout.html' %}
 {% block title %}Birthday Schedule{% endblock %}
+{% block top_actions %}
+{% if is_admin %}
+<form method="post" action="/schedule/send">
+    <button class="btn btn-primary" type="submit">Send Scheduled Mails</button>
+</form>
+{% endif %}
+{% endblock %}
 {% block content %}
 <p class="muted">Birthday mails scheduled for today.</p>
 <table class="items-table">

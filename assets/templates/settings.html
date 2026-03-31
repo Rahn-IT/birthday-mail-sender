@@ -38,6 +38,18 @@
         <input id="send_for_years" name="send_for_years" type="number" min="0" value="{{ send_for_years }}" required />
     </p>
     <p>
+        <label for="schedule_at_utc_hour">Schedule At UTC Hour</label><br />
+        <input
+            id="schedule_at_utc_hour"
+            name="schedule_at_utc_hour"
+            type="number"
+            min="0"
+            max="23"
+            value="{{ schedule_at_utc_hour }}"
+            required
+        />
+    </p>
+    <p>
         <label for="tls_mode">TLS Mode</label><br />
         <select id="tls_mode" name="tls_mode" required>
             <option value="starttls"{% if tls_mode == "starttls" %} selected{% endif %}>STARTTLS</option>

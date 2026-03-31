@@ -59,6 +59,11 @@ async fn main() {
         users::run_session_gc_scheduler(db).await;
     });
 
+    let birthday_scheduler_db = state.db.clone();
+    tokio::spawn(async move {
+        birthday_scheduler::run_daily_scheduler(birthday_scheduler_db).await;
+    });
+
     // build our application with a route
     let app = router()
         .layer(middleware::from_fn_with_state(
@@ -86,6 +91,7 @@ fn router() -> Router<AppState> {
         .route("/people/{id}", get(people::show));
 
     let admin_routes = Router::new()
+        .route("/schedule/send", post(birthday_scheduler::send))
         .route("/users", get(users::index).post(users::create_post))
         .route("/settings", get(settings::index).post(settings::save))
         .route("/settings/test-mail", post(settings::send_test_mail))

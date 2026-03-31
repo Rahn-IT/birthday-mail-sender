@@ -1,4 +1,4 @@
-use axum::{extract::State, response::Html};
+use axum::{extract::State, response::{Html, Redirect}};
 use serde::Serialize;
 use sqlx::SqlitePool;
 use uuid::Uuid;
@@ -46,7 +46,12 @@ pub async fn index(
     let recipients = if settings.send_for_years <= 0 {
         Vec::new()
     } else {
-        load_scheduled_recipients(&state.db, settings.send_for_years).await?
+        load_scheduled_recipients(
+            &state.db,
+            settings.send_for_years,
+            settings.schedule_at_utc_hour,
+        )
+        .await?
     };
     let recent_threshold = unix_now().saturating_sub(RECENT_SEND_WINDOW_SECONDS);
     let entries = recipients
@@ -73,14 +78,24 @@ pub async fn index(
     Ok(Html(rendered))
 }
 
-pub async fn send_scheduled(db: &SqlitePool) -> Result<u64, AppError> {
+pub async fn send(State(state): State<AppState>) -> Result<Redirect, AppError> {
+    send_scheduled_mails(&state.db).await?;
+    Ok(Redirect::to("/schedule"))
+}
+
+pub async fn send_scheduled_mails(db: &SqlitePool) -> Result<u64, AppError> {
     let settings = settings::load_settings().await?;
     if settings.send_for_years <= 0 {
         return Ok(0);
     }
 
     let template_bytes = tokio::fs::read(TEMPLATE_PATH).await?;
-    let recipients = load_scheduled_recipients(db, settings.send_for_years).await?;
+    let recipients = load_scheduled_recipients(
+        db,
+        settings.send_for_years,
+        settings.schedule_at_utc_hour,
+    )
+    .await?;
     let mut sent_count = 0_u64;
     let recent_threshold = unix_now().saturating_sub(RECENT_SEND_WINDOW_SECONDS);
 
@@ -120,10 +135,37 @@ pub async fn send_scheduled(db: &SqlitePool) -> Result<u64, AppError> {
     Ok(sent_count)
 }
 
+pub async fn run_daily_scheduler(db: SqlitePool) {
+    loop {
+        let settings = match settings::load_settings().await {
+            Ok(value) => value,
+            Err(err) => {
+                eprintln!("Birthday scheduler: could not load settings: {}", err);
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                continue;
+            }
+        };
+        let sleep_seconds = seconds_until_next_run(settings.schedule_at_utc_hour).max(60);
+
+        tokio::time::sleep(std::time::Duration::from_secs(sleep_seconds as u64)).await;
+
+        match send_scheduled_mails(&db).await {
+            Ok(count) => {
+                println!("Birthday scheduler: sent {} scheduled mail(s).", count);
+            }
+            Err(err) => {
+                eprintln!("Birthday scheduler failed: {}", err);
+            }
+        }
+    }
+}
+
 async fn load_scheduled_recipients(
     db: &SqlitePool,
     send_for_years: i64,
+    schedule_at_utc_hour: i64,
 ) -> Result<Vec<ScheduledRecipient>, AppError> {
+    let shifted_now_modifier = schedule_at_utc_modifier(schedule_at_utc_hour);
     let recipients = sqlx::query_as!(
         ScheduledRecipient,
         r#"
@@ -136,9 +178,9 @@ async fn load_scheduled_recipients(
             MAX(sent.sent_at) as "last_sent_at?: i64"
         FROM people
         LEFT JOIN sent ON sent.user_id = people.id
-        WHERE strftime('%m-%d', people.birthday) = strftime('%m-%d', 'now', 'localtime')
-            AND CAST(strftime('%Y', 'now', 'localtime') AS INTEGER) >= people.start_year
-            AND CAST(strftime('%Y', 'now', 'localtime') AS INTEGER) < people.start_year + ?
+        WHERE strftime('%m-%d', people.birthday) = strftime('%m-%d', 'now', ?)
+            AND CAST(strftime('%Y', 'now', ?) AS INTEGER) >= people.start_year
+            AND CAST(strftime('%Y', 'now', ?) AS INTEGER) < people.start_year + ?
         GROUP BY
             people.id,
             people.first_name,
@@ -147,6 +189,9 @@ async fn load_scheduled_recipients(
             people.email
         ORDER BY people.last_name ASC, people.first_name ASC
         "#,
+        shifted_now_modifier,
+        shifted_now_modifier,
+        shifted_now_modifier,
         send_for_years
     )
     .fetch_all(db)
@@ -155,9 +200,24 @@ async fn load_scheduled_recipients(
     Ok(recipients)
 }
 
+fn seconds_until_next_run(schedule_at_utc_hour: i64) -> i64 {
+    let now_seconds = unix_now().rem_euclid(24 * 3600);
+    let target_seconds = schedule_at_utc_hour * 3600;
+
+    if now_seconds < target_seconds {
+        target_seconds - now_seconds
+    } else {
+        (24 * 3600 - now_seconds) + target_seconds
+    }
+}
+
 fn unix_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs() as i64)
         .unwrap_or(0)
+}
+
+fn schedule_at_utc_modifier(schedule_at_utc_hour: i64) -> String {
+    format!("+{} hours", schedule_at_utc_hour)
 }
