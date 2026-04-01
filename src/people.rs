@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     response::{Html, IntoResponse, Redirect, Response},
 };
 use axum_extra::extract::Form;
@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{AppState, error::AppError, users::CurrentUser};
+
+const PEOPLE_PAGE_SIZE: i64 = 25;
 
 #[derive(Debug, Clone)]
 struct Person {
@@ -60,6 +62,12 @@ impl Person {
 struct PeopleIndexView {
     is_admin: bool,
     people: Vec<PersonListItem>,
+    page: i64,
+    total_pages: i64,
+    has_previous_page: bool,
+    has_next_page: bool,
+    previous_page_href: String,
+    next_page_href: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -134,6 +142,11 @@ pub struct PersonForm {
     birthday: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PeopleIndexQuery {
+    page: Option<i64>,
+}
+
 enum FormPageMode {
     Create,
     Edit,
@@ -141,10 +154,15 @@ enum FormPageMode {
 
 pub async fn index(
     State(state): State<AppState>,
+    Query(query): Query<PeopleIndexQuery>,
     current_user: CurrentUser,
 ) -> Result<Html<String>, AppError> {
-    let people = load_people(&state).await?;
-    render_index(&state, &current_user, people)
+    let page = query.page.unwrap_or(1).max(1);
+    let total_people = count_people(&state).await?;
+    let total_pages = ((total_people + PEOPLE_PAGE_SIZE - 1) / PEOPLE_PAGE_SIZE).max(1);
+    let page = page.min(total_pages);
+    let people = load_people(&state, page).await?;
+    render_index(&state, &current_user, people, page, total_pages)
 }
 
 pub async fn create_get(
@@ -249,7 +267,16 @@ pub async fn edit_post(
     Ok(Redirect::to(&format!("/people/{}", id)).into_response())
 }
 
-async fn load_people(state: &AppState) -> Result<Vec<PersonListItem>, AppError> {
+async fn count_people(state: &AppState) -> Result<i64, AppError> {
+    Ok(
+        sqlx::query_scalar!("SELECT COUNT(*) as \"count!: i64\" FROM people")
+            .fetch_one(&state.db)
+            .await?,
+    )
+}
+
+async fn load_people(state: &AppState, page: i64) -> Result<Vec<PersonListItem>, AppError> {
+    let offset = (page - 1) * PEOPLE_PAGE_SIZE;
     let people = sqlx::query_as!(
         Person,
         r#"
@@ -263,7 +290,10 @@ async fn load_people(state: &AppState) -> Result<Vec<PersonListItem>, AppError> 
             start_year
         FROM people
         ORDER BY last_name ASC, first_name ASC, start_year ASC
+        LIMIT ? OFFSET ?
         "#,
+        PEOPLE_PAGE_SIZE,
+        offset
     )
     .fetch_all(&state.db)
     .await?;
@@ -315,6 +345,8 @@ fn render_index(
     state: &AppState,
     current_user: &CurrentUser,
     people: Vec<PersonListItem>,
+    page: i64,
+    total_pages: i64,
 ) -> Result<Html<String>, AppError> {
     let template = state
         .jinja
@@ -323,6 +355,12 @@ fn render_index(
     let rendered = template.render(PeopleIndexView {
         is_admin: current_user.is_admin,
         people,
+        page,
+        total_pages,
+        has_previous_page: page > 1,
+        has_next_page: page < total_pages,
+        previous_page_href: format!("/people?page={}", page - 1),
+        next_page_href: format!("/people?page={}", page + 1),
     })?;
     Ok(Html(rendered))
 }
@@ -340,7 +378,7 @@ fn render_form(
         .expect("template is loaded");
     let (title, form_action, submit_label, cancel_href) = match mode {
         FormPageMode::Create => (
-            "Add User".to_string(),
+            "Add Person".to_string(),
             "/people/new".to_string(),
             "Create User".to_string(),
             "/people".to_string(),
