@@ -9,7 +9,7 @@
     <p><strong>Uploaded File:</strong> {{ filename }}</p>
     <p><strong>Sheet:</strong> {{ sheet_name }}</p>
 </div>
-<form id="import-mapping-form" class="plan-form">
+<form id="import-mapping-form" method="post" action="/import/{{ filename }}" class="plan-form">
     <table class="items-table">
         <thead>
             <tr>

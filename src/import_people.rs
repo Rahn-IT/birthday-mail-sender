@@ -8,8 +8,10 @@ use axum::{
     extract::{Multipart, Path as AxumPath, State},
     response::{Html, IntoResponse, Redirect, Response},
 };
-use calamine::{Data, Reader, open_workbook_auto_from_rs};
-use serde::Serialize;
+use calamine::{Data, DataType, Reader, open_workbook_auto_from_rs};
+use chrono::{Datelike, NaiveDate};
+use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::{AppState, error::AppError, users::CurrentUser};
@@ -38,6 +40,36 @@ struct ImportMappingPageView {
 struct ImportMappingRowView {
     field_label: &'static str,
     field_name: &'static str,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ImportMappingForm {
+    first_name: String,
+    first_name_transform: ImportTransform,
+    last_name: String,
+    last_name_transform: ImportTransform,
+    greeting: String,
+    greeting_transform: ImportTransform,
+    email: String,
+    email_transform: ImportTransform,
+    birthday: String,
+    birthday_transform: ImportTransform,
+}
+
+#[derive(Debug)]
+struct ImportedPerson {
+    first_name: String,
+    last_name: String,
+    greeting: String,
+    email: String,
+    birthday: String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ImportTransform {
+    #[default]
+    None,
 }
 
 pub async fn ensure_uploads_dir() -> Result<(), AppError> {
@@ -157,6 +189,31 @@ pub async fn show(
         ],
     })?;
     Ok(Html(rendered))
+}
+
+pub async fn import(
+    State(state): State<AppState>,
+    AxumPath(filename): AxumPath<String>,
+    axum_extra::extract::Form(form): axum_extra::extract::Form<ImportMappingForm>,
+) -> Result<Redirect, AppError> {
+    let validated_filename = validate_uploaded_filename(&filename)?;
+    let upload_path = upload_path_for(&validated_filename);
+
+    if !tokio::fs::try_exists(&upload_path).await? {
+        return Err(AppError::not_found_for(
+            "Import File",
+            format!("No uploaded spreadsheet exists for file: {}", validated_filename),
+        ));
+    }
+
+    let imported_people = tokio::task::spawn_blocking(move || {
+        load_people_from_import_file(&upload_path, &form)
+    })
+    .await
+    .map_err(|err| AppError::internal(anyhow::anyhow!(err.to_string())))??;
+
+    import_people_into_db(&state.db, imported_people).await?;
+    Ok(Redirect::to("/people"))
 }
 
 pub async fn run_upload_cleanup_scheduler() {
@@ -297,6 +354,64 @@ fn upload_path_for(filename: &str) -> PathBuf {
 }
 
 fn load_available_columns_from_file(path: &Path) -> Result<(String, Vec<String>), AppError> {
+    let (sheet_name, available_columns, _) = load_sheet(path)?;
+    Ok((sheet_name, available_columns))
+}
+
+fn load_people_from_import_file(
+    path: &Path,
+    form: &ImportMappingForm,
+) -> Result<Vec<ImportedPerson>, AppError> {
+    validate_transform(form.first_name_transform)?;
+    validate_transform(form.last_name_transform)?;
+    validate_transform(form.greeting_transform)?;
+    validate_transform(form.email_transform)?;
+    validate_transform(form.birthday_transform)?;
+
+    let (_sheet_name, available_columns, rows) = load_sheet(path)?;
+    let first_name_index = column_index(&available_columns, &form.first_name)?;
+    let last_name_index = column_index(&available_columns, &form.last_name)?;
+    let greeting_index = column_index(&available_columns, &form.greeting)?;
+    let email_index = column_index(&available_columns, &form.email)?;
+    let birthday_index = column_index(&available_columns, &form.birthday)?;
+
+    let mut imported_people = Vec::new();
+
+    for row in &rows {
+        let first_name = match required_string_cell(row, first_name_index)? {
+            Some(value) => value,
+            None => continue,
+        };
+        let last_name = match required_string_cell(row, last_name_index)? {
+            Some(value) => value,
+            None => continue,
+        };
+        let greeting = match required_string_cell(row, greeting_index)? {
+            Some(value) => value,
+            None => continue,
+        };
+        let email = match required_email_cell(row, email_index)? {
+            Some(value) => value,
+            None => continue,
+        };
+        let birthday = match required_date_cell(row, birthday_index)? {
+            Some(value) => value,
+            None => continue,
+        };
+
+        imported_people.push(ImportedPerson {
+            first_name,
+            last_name,
+            greeting,
+            email,
+            birthday,
+        });
+    }
+
+    Ok(imported_people)
+}
+
+fn load_sheet(path: &Path) -> Result<(String, Vec<String>, Vec<Vec<Data>>), AppError> {
     let bytes = std::fs::read(path)?;
     let mut workbook = open_workbook_auto_from_rs(Cursor::new(bytes))?;
     let sheet_name = workbook
@@ -305,18 +420,78 @@ fn load_available_columns_from_file(path: &Path) -> Result<(String, Vec<String>)
         .cloned()
         .ok_or_else(|| AppError::conflict("Spreadsheet does not contain any sheets."))?;
     let range = workbook.worksheet_range(&sheet_name)?;
-
-    let available_columns = range
-        .rows()
+    let mut rows_iter = range.rows();
+    let header_row = rows_iter
         .next()
-        .map(|row| {
-            row.iter()
-                .filter_map(data_to_column_name)
-                .collect::<Vec<String>>()
-        })
-        .unwrap_or_default();
+        .ok_or_else(|| AppError::conflict("Spreadsheet does not contain a header row."))?;
 
-    Ok((sheet_name, available_columns))
+    let available_columns = header_row
+        .iter()
+        .filter_map(data_to_column_name)
+        .collect::<Vec<String>>();
+
+    let rows = rows_iter.map(|row| row.to_vec()).collect::<Vec<Vec<Data>>>();
+
+    Ok((sheet_name, available_columns, rows))
+}
+
+async fn import_people_into_db(db: &SqlitePool, imported_people: Vec<ImportedPerson>) -> Result<(), AppError> {
+    let current_year = chrono::Local::now().year() as i64;
+    let mut tx = db.begin().await?;
+
+    for person in imported_people {
+        let email_lookup = person.email.to_ascii_lowercase();
+        let existing_id = sqlx::query_scalar!(
+            r#"
+            SELECT id as "id: uuid::Uuid"
+            FROM people
+            WHERE LOWER(email) = ?
+            LIMIT 1
+            "#,
+            email_lookup
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        if let Some(id) = existing_id {
+            sqlx::query!(
+                r#"
+                UPDATE people
+                SET first_name = ?, last_name = ?, greeting = ?, email = ?, birthday = ?, start_year = ?
+                WHERE id = ?
+                "#,
+                person.first_name,
+                person.last_name,
+                person.greeting,
+                person.email,
+                person.birthday,
+                current_year,
+                id
+            )
+            .execute(&mut *tx)
+            .await?;
+        } else {
+            let id = Uuid::new_v4();
+            sqlx::query!(
+                r#"
+                INSERT INTO people (id, first_name, last_name, greeting, email, birthday, start_year)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                "#,
+                id,
+                person.first_name,
+                person.last_name,
+                person.greeting,
+                person.email,
+                person.birthday,
+                current_year
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+
+    tx.commit().await?;
+    Ok(())
 }
 
 fn data_to_column_name(data: &Data) -> Option<String> {
@@ -327,4 +502,96 @@ fn data_to_column_name(data: &Data) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+fn validate_transform(transform: ImportTransform) -> Result<(), AppError> {
+    match transform {
+        ImportTransform::None => Ok(()),
+    }
+}
+
+fn column_index(columns: &[String], selected: &str) -> Result<usize, AppError> {
+    columns
+        .iter()
+        .position(|column| column == selected)
+        .ok_or_else(|| AppError::conflict(format!("Selected import column not found: {}", selected)))
+}
+
+fn required_string_cell(row: &[Data], index: usize) -> Result<Option<String>, AppError> {
+    let value = row
+        .get(index)
+        .map(cell_to_string)
+        .transpose()
+        ?
+        .unwrap_or_default();
+    let trimmed = value.trim().to_string();
+    if trimmed.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(trimmed))
+    }
+}
+
+fn required_email_cell(row: &[Data], index: usize) -> Result<Option<String>, AppError> {
+    let Some(email) = required_string_cell(row, index)? else {
+        return Ok(None);
+    };
+
+    if !email.contains('@') {
+        return Err(AppError::conflict(format!(
+            "Invalid email value in import data: {}",
+            email
+        )));
+    }
+
+    Ok(Some(email))
+}
+
+fn required_date_cell(row: &[Data], index: usize) -> Result<Option<String>, AppError> {
+    let Some(cell) = row.get(index) else {
+        return Ok(None);
+    };
+
+    if matches!(cell, Data::Empty) {
+        return Ok(None);
+    }
+
+    let date = cell_to_date(cell).ok_or_else(|| {
+        AppError::conflict(format!(
+            "Invalid birthday value in import data: {}",
+            cell
+        ))
+    })?;
+
+    Ok(Some(date.format("%Y-%m-%d").to_string()))
+}
+
+fn cell_to_string(cell: &Data) -> Result<String, AppError> {
+    match cell {
+        Data::Empty => Ok(String::new()),
+        _ => Ok(cell.to_string()),
+    }
+}
+
+fn cell_to_date(cell: &Data) -> Option<NaiveDate> {
+    cell.as_date().or_else(|| {
+        let text = cell.to_string();
+        parse_date_text(text.trim())
+    })
+}
+
+fn parse_date_text(value: &str) -> Option<NaiveDate> {
+    if value.is_empty() {
+        return None;
+    }
+
+    [
+        "%Y-%m-%d",
+        "%d.%m.%Y",
+        "%d/%m/%Y",
+        "%m/%d/%Y",
+        "%d-%m-%Y",
+    ]
+    .into_iter()
+    .find_map(|format| NaiveDate::parse_from_str(value, format).ok())
 }
