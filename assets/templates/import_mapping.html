@@ -1,0 +1,38 @@
+{% extends 'layout.html' %}
+{% block title %}Import Mapping{% endblock %}
+{% block top_actions %}
+<a class="btn" href="/import">Back to Upload</a>
+{% endblock %}
+{% block content %}
+<p class="muted">Configure how spreadsheet columns map to person record fields.</p>
+<div class="details-card">
+    <p><strong>Uploaded File:</strong> {{ filename }}</p>
+    <p><strong>Sheet:</strong> {{ sheet_name }}</p>
+</div>
+<form class="plan-form">
+    <table class="items-table">
+        <thead>
+            <tr>
+                <th>Record Field</th>
+                <th>Spreadsheet Column</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for mapping in mappings %}
+            <tr>
+                <td>{{ mapping.field_label }}</td>
+                <td>
+                    <select name="{{ mapping.field_name }}">
+                        <option value="">Choose a column</option>
+                        {% for column in available_columns %}
+                        <option value="{{ column }}">{{ column }}</option>
+                        {% endfor %}
+                    </select>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</form>
+<p class="muted">Saving the mapping and importing rows will come in the next step.</p>
+{% endblock %}

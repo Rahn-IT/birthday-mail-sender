@@ -1,10 +1,9 @@
 use std::fmt;
 
 use axum::{
-    http::{HeaderValue, StatusCode, header},
+    http::StatusCode,
     response::{IntoResponse, Response},
 };
-use serde::Serialize;
 
 #[derive(Debug)]
 pub struct AppError {
@@ -75,68 +74,6 @@ impl fmt::Display for AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let message = self.message;
-
-        if self.status == StatusCode::NOT_FOUND
-            || self.status == StatusCode::CONFLICT
-            || self.status == StatusCode::FORBIDDEN
-            || self.status == StatusCode::UNAUTHORIZED
-        {
-            let (title, button_label, button_href): (String, &str, &str) =
-                if self.status == StatusCode::NOT_FOUND {
-                    (
-                        format!(
-                            "{} Not Found",
-                            self.not_found_title.as_deref().unwrap_or("Site")
-                        ),
-                        "Back Home",
-                        "/",
-                    )
-                } else if self.status == StatusCode::FORBIDDEN {
-                    ("Forbidden".to_string(), "Back Home", "/")
-                } else if self.status == StatusCode::UNAUTHORIZED {
-                    ("Unauthorized".to_string(), "Login", "/login")
-                } else {
-                    ("Cannot Save Changes".to_string(), "Back Home", "/")
-                };
-
-            let mut jinja = minijinja::Environment::new();
-            minijinja_embed::load_templates!(&mut jinja);
-            let rendered = jinja
-                .get_template("error.html")
-                .expect("template is loaded")
-                .render(ErrorView {
-                    title,
-                    message: message.clone(),
-                    button_label: button_label.to_string(),
-                    button_href: button_href.to_string(),
-                });
-
-            if let Ok(html) = rendered {
-                return (
-                    self.status,
-                    [(
-                        header::CONTENT_TYPE,
-                        HeaderValue::from_static(mime::TEXT_HTML_UTF_8.as_ref()),
-                    )],
-                    html,
-                )
-                    .into_response();
-            }
-        }
-
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Something went wrong: {}", message),
-        )
-            .into_response()
+        (self.status, self.message).into_response()
     }
-}
-
-#[derive(Debug, Serialize)]
-struct ErrorView {
-    title: String,
-    message: String,
-    button_label: String,
-    button_href: String,
 }

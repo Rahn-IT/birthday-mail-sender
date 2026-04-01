@@ -1,12 +1,14 @@
 use std::{
+    io::Cursor,
     path::{Path, PathBuf},
     time::{Duration, SystemTime},
 };
 
 use axum::{
-    extract::{Multipart, State},
+    extract::{Multipart, Path as AxumPath, State},
     response::{Html, IntoResponse, Redirect, Response},
 };
+use calamine::{Data, Reader, open_workbook_auto_from_rs};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -21,6 +23,21 @@ struct ImportPageView {
     is_admin: bool,
     has_error: bool,
     error_message: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ImportMappingPageView {
+    is_admin: bool,
+    filename: String,
+    sheet_name: String,
+    available_columns: Vec<String>,
+    mappings: Vec<ImportMappingRowView>,
+}
+
+#[derive(Debug, Serialize)]
+struct ImportMappingRowView {
+    field_label: &'static str,
+    field_name: &'static str,
 }
 
 pub async fn ensure_uploads_dir() -> Result<(), AppError> {
@@ -84,6 +101,62 @@ pub async fn upload(
 
     render_index_with_error(&state, &current_user, "Please choose a spreadsheet file to upload.")
         .map(IntoResponse::into_response)
+}
+
+pub async fn show(
+    State(state): State<AppState>,
+    current_user: CurrentUser,
+    AxumPath(filename): AxumPath<String>,
+) -> Result<Html<String>, AppError> {
+    let validated_filename = validate_uploaded_filename(&filename)?;
+    let upload_path = upload_path_for(&validated_filename);
+
+    if !tokio::fs::try_exists(&upload_path).await? {
+        return Err(AppError::not_found_for(
+            "Import File",
+            format!("No uploaded spreadsheet exists for file: {}", validated_filename),
+        ));
+    }
+
+    let (sheet_name, available_columns) = tokio::task::spawn_blocking(move || {
+        load_available_columns_from_file(&upload_path)
+    })
+    .await
+    .map_err(|err| AppError::internal(anyhow::anyhow!(err.to_string())))??;
+
+    let template = state
+        .jinja
+        .get_template("import_mapping.html")
+        .expect("template is loaded");
+    let rendered = template.render(ImportMappingPageView {
+        is_admin: current_user.is_admin,
+        filename: validated_filename,
+        sheet_name,
+        available_columns,
+        mappings: vec![
+            ImportMappingRowView {
+                field_label: "First name",
+                field_name: "first_name",
+            },
+            ImportMappingRowView {
+                field_label: "Last name",
+                field_name: "last_name",
+            },
+            ImportMappingRowView {
+                field_label: "Greeting",
+                field_name: "greeting",
+            },
+            ImportMappingRowView {
+                field_label: "Email",
+                field_name: "email",
+            },
+            ImportMappingRowView {
+                field_label: "Birthday",
+                field_name: "birthday",
+            },
+        ],
+    })?;
+    Ok(Html(rendered))
 }
 
 pub async fn run_upload_cleanup_scheduler() {
@@ -170,13 +243,88 @@ fn render_index_with_error(
 }
 
 fn normalize_spreadsheet_extension(file_name: &str) -> Option<String> {
-    let extension = Path::new(file_name).extension()?.to_str()?.to_ascii_lowercase();
+    let extension = Path::new(file_name).extension()?.to_str()?;
+    normalize_spreadsheet_extension_value(extension)
+}
+
+fn normalize_spreadsheet_extension_value(extension: &str) -> Option<String> {
+    let extension = extension.to_ascii_lowercase();
     match extension.as_str() {
         "xls" | "xlsx" | "xlsm" | "xlsb" | "ods" => Some(extension),
         _ => None,
     }
 }
 
+fn validate_uploaded_filename(filename: &str) -> Result<String, AppError> {
+    if filename.is_empty() {
+        return Err(AppError::not_found_for(
+            "Import File",
+            "Invalid uploaded filename.",
+        ));
+    }
+
+    let Some((uuid_part, extension)) = filename.rsplit_once('.') else {
+        return Err(AppError::not_found_for(
+            "Import File",
+            "Invalid uploaded filename.",
+        ));
+    };
+
+    if !uuid_part
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte) || byte == b'-')
+    {
+        return Err(AppError::not_found_for(
+            "Import File",
+            "Invalid uploaded filename.",
+        ));
+    }
+
+    if Uuid::parse_str(uuid_part).is_err()
+        || normalize_spreadsheet_extension_value(extension).is_none()
+    {
+        return Err(AppError::not_found_for(
+            "Import File",
+            "Invalid uploaded filename.",
+        ));
+    }
+
+    Ok(filename.to_string())
+}
+
 fn upload_path_for(filename: &str) -> PathBuf {
     Path::new(UPLOADS_PATH).join(filename)
+}
+
+fn load_available_columns_from_file(path: &Path) -> Result<(String, Vec<String>), AppError> {
+    let bytes = std::fs::read(path)?;
+    let mut workbook = open_workbook_auto_from_rs(Cursor::new(bytes))?;
+    let sheet_name = workbook
+        .sheet_names()
+        .first()
+        .cloned()
+        .ok_or_else(|| AppError::conflict("Spreadsheet does not contain any sheets."))?;
+    let range = workbook.worksheet_range(&sheet_name)?;
+
+    let available_columns = range
+        .rows()
+        .next()
+        .map(|row| {
+            row.iter()
+                .filter_map(data_to_column_name)
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
+
+    Ok((sheet_name, available_columns))
+}
+
+fn data_to_column_name(data: &Data) -> Option<String> {
+    let value = data.to_string();
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }

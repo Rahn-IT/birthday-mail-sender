@@ -120,6 +120,7 @@ fn router() -> Router<AppState> {
         .route("/login", get(users::login_get).post(users::login_post))
         .route("/logout", post(users::logout_post))
         .route("/import", get(import_people::index).post(import_people::upload))
+        .route("/import/{filename}", get(import_people::show))
         .route(
             "/static/style.css",
             get((
