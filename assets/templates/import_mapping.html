@@ -9,12 +9,13 @@
     <p><strong>Uploaded File:</strong> {{ filename }}</p>
     <p><strong>Sheet:</strong> {{ sheet_name }}</p>
 </div>
-<form class="plan-form">
+<form id="import-mapping-form" class="plan-form">
     <table class="items-table">
         <thead>
             <tr>
                 <th>Record Field</th>
                 <th>Spreadsheet Column</th>
+                <th>Transform</th>
             </tr>
         </thead>
         <tbody>
@@ -22,11 +23,16 @@
             <tr>
                 <td>{{ mapping.field_label }}</td>
                 <td>
-                    <select name="{{ mapping.field_name }}">
+                    <select name="{{ mapping.field_name }}" required>
                         <option value="">Choose a column</option>
                         {% for column in available_columns %}
                         <option value="{{ column }}">{{ column }}</option>
                         {% endfor %}
+                    </select>
+                </td>
+                <td>
+                    <select name="{{ mapping.field_name }}_transform" required>
+                        <option value="none" selected>None</option>
                     </select>
                 </td>
             </tr>
@@ -34,5 +40,7 @@
         </tbody>
     </table>
 </form>
-<p class="muted">Saving the mapping and importing rows will come in the next step.</p>
+<div class="toolbar">
+    <input class="btn btn-primary" type="submit" value="Import" form="import-mapping-form" />
+</div>
 {% endblock %}
