@@ -70,6 +70,27 @@ struct ImportedPerson {
 pub enum ImportTransform {
     #[default]
     None,
+    SelectFirstWord,
+    SelectLastWord,
+}
+
+impl ImportTransform {
+    fn apply(self, value: &str) -> String {
+        let trimmed = value.trim();
+        match self {
+            Self::None => trimmed.to_string(),
+            Self::SelectFirstWord => trimmed
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_string(),
+            Self::SelectLastWord => trimmed
+                .split_whitespace()
+                .last()
+                .unwrap_or("")
+                .to_string(),
+        }
+    }
 }
 
 pub async fn ensure_uploads_dir() -> Result<(), AppError> {
@@ -206,13 +227,15 @@ pub async fn import(
         ));
     }
 
+    let upload_path_for_read = upload_path.clone();
     let imported_people = tokio::task::spawn_blocking(move || {
-        load_people_from_import_file(&upload_path, &form)
+        load_people_from_import_file(&upload_path_for_read, &form)
     })
     .await
     .map_err(|err| AppError::internal(anyhow::anyhow!(err.to_string())))??;
 
     import_people_into_db(&state.db, imported_people).await?;
+    tokio::fs::remove_file(&upload_path).await?;
     Ok(Redirect::to("/people"))
 }
 
@@ -378,23 +401,23 @@ fn load_people_from_import_file(
     let mut imported_people = Vec::new();
 
     for row in &rows {
-        let first_name = match required_string_cell(row, first_name_index)? {
+        let first_name = match required_string_cell(row, first_name_index, form.first_name_transform)? {
             Some(value) => value,
             None => continue,
         };
-        let last_name = match required_string_cell(row, last_name_index)? {
+        let last_name = match required_string_cell(row, last_name_index, form.last_name_transform)? {
             Some(value) => value,
             None => continue,
         };
-        let greeting = match required_string_cell(row, greeting_index)? {
+        let greeting = match required_string_cell(row, greeting_index, form.greeting_transform)? {
             Some(value) => value,
             None => continue,
         };
-        let email = match required_email_cell(row, email_index)? {
+        let email = match required_email_cell(row, email_index, form.email_transform)? {
             Some(value) => value,
             None => continue,
         };
-        let birthday = match required_date_cell(row, birthday_index)? {
+        let birthday = match required_date_cell(row, birthday_index, form.birthday_transform)? {
             Some(value) => value,
             None => continue,
         };
@@ -506,7 +529,7 @@ fn data_to_column_name(data: &Data) -> Option<String> {
 
 fn validate_transform(transform: ImportTransform) -> Result<(), AppError> {
     match transform {
-        ImportTransform::None => Ok(()),
+        ImportTransform::None | ImportTransform::SelectFirstWord | ImportTransform::SelectLastWord => Ok(()),
     }
 }
 
@@ -517,23 +540,31 @@ fn column_index(columns: &[String], selected: &str) -> Result<usize, AppError> {
         .ok_or_else(|| AppError::conflict(format!("Selected import column not found: {}", selected)))
 }
 
-fn required_string_cell(row: &[Data], index: usize) -> Result<Option<String>, AppError> {
+fn required_string_cell(
+    row: &[Data],
+    index: usize,
+    transform: ImportTransform,
+) -> Result<Option<String>, AppError> {
     let value = row
         .get(index)
         .map(cell_to_string)
         .transpose()
         ?
         .unwrap_or_default();
-    let trimmed = value.trim().to_string();
-    if trimmed.is_empty() {
+    let transformed = transform.apply(&value);
+    if transformed.is_empty() {
         Ok(None)
     } else {
-        Ok(Some(trimmed))
+        Ok(Some(transformed))
     }
 }
 
-fn required_email_cell(row: &[Data], index: usize) -> Result<Option<String>, AppError> {
-    let Some(email) = required_string_cell(row, index)? else {
+fn required_email_cell(
+    row: &[Data],
+    index: usize,
+    transform: ImportTransform,
+) -> Result<Option<String>, AppError> {
+    let Some(email) = required_string_cell(row, index, transform)? else {
         return Ok(None);
     };
 
@@ -547,7 +578,11 @@ fn required_email_cell(row: &[Data], index: usize) -> Result<Option<String>, App
     Ok(Some(email))
 }
 
-fn required_date_cell(row: &[Data], index: usize) -> Result<Option<String>, AppError> {
+fn required_date_cell(
+    row: &[Data],
+    index: usize,
+    transform: ImportTransform,
+) -> Result<Option<String>, AppError> {
     let Some(cell) = row.get(index) else {
         return Ok(None);
     };
@@ -556,7 +591,7 @@ fn required_date_cell(row: &[Data], index: usize) -> Result<Option<String>, AppE
         return Ok(None);
     }
 
-    let date = cell_to_date(cell).ok_or_else(|| {
+    let date = cell_to_date(cell, transform).ok_or_else(|| {
         AppError::conflict(format!(
             "Invalid birthday value in import data: {}",
             cell
@@ -573,11 +608,17 @@ fn cell_to_string(cell: &Data) -> Result<String, AppError> {
     }
 }
 
-fn cell_to_date(cell: &Data) -> Option<NaiveDate> {
-    cell.as_date().or_else(|| {
-        let text = cell.to_string();
-        parse_date_text(text.trim())
-    })
+fn cell_to_date(cell: &Data, transform: ImportTransform) -> Option<NaiveDate> {
+    match cell {
+        Data::DateTime(_) | Data::DateTimeIso(_) => {
+            let text = transform.apply(&cell.to_string());
+            parse_date_text(&text).or_else(|| cell.as_date())
+        }
+        _ => {
+            let text = transform.apply(&cell.to_string());
+            parse_date_text(&text)
+        }
+    }
 }
 
 fn parse_date_text(value: &str) -> Option<NaiveDate> {
