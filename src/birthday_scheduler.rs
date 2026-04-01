@@ -8,7 +8,9 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::{
-    AppState, error::AppError, settings,
+    AppState,
+    error::AppError,
+    settings,
     template_mailer::{self, TemplateValues},
     users::CurrentUser,
 };
@@ -83,7 +85,8 @@ pub async fn send(State(state): State<AppState>) -> Result<Redirect, AppError> {
 
 pub async fn send_scheduled_mails(db: &SqlitePool) -> Result<u64, AppError> {
     let settings = settings::load_settings().await?;
-    if settings.send_for_years <= 0 {
+
+    if settings.disable_scheduled_mails || settings.send_for_years <= 0 {
         return Ok(0);
     }
 
@@ -138,6 +141,7 @@ pub async fn run_daily_scheduler(db: SqlitePool) {
                 continue;
             }
         };
+
         let sleep_seconds = seconds_until_next_run(&settings.schedule_at_local_time).max(60);
 
         tokio::time::sleep(std::time::Duration::from_secs(sleep_seconds as u64)).await;

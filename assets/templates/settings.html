@@ -1,5 +1,5 @@
 {% extends 'layout.html' %}
-{% block title %} Settings {% endblock %}
+{% block title %}Settings{% endblock %}
 {% block content %}
 <p class="muted">Admin-only mail sender configuration.</p>
 {% if has_error and error_message %}
@@ -11,39 +11,51 @@
 <form method="post" action="/settings" class="plan-form">
     <p>
         <label for="smtp_host">SMTP Host</label><br />
-        <input id="smtp_host" name="smtp_host" type="text" value="{{ smtp_host }}" required />
+        <input id="smtp_host" name="smtp_host" type="text" value="{{ settings.smtp_host }}" required />
     </p>
     <p>
         <label for="smtp_port">SMTP Port</label><br />
-        <input id="smtp_port" name="smtp_port" type="number" min="1" max="65535" value="{{ smtp_port }}" required />
+        <input id="smtp_port" name="smtp_port" type="number" min="1" max="65535" value="{{ settings.smtp_port }}" required />
     </p>
     <p>
         <label for="tls_mode">TLS Mode</label><br />
         <select id="tls_mode" name="tls_mode" required>
-            <option value="starttls"{% if tls_mode == "starttls" %} selected{% endif %}>STARTTLS</option>
-            <option value="smtps"{% if tls_mode == "smtps" %} selected{% endif %}>SMTPS (Implicit TLS)</option>
-            <option value="none"{% if tls_mode == "none" %} selected{% endif %}>None (Plain SMTP)</option>
+            <option value="starttls"{% if settings.tls_mode == "starttls" %} selected{% endif %}>STARTTLS</option>
+            <option value="smtps"{% if settings.tls_mode == "smtps" %} selected{% endif %}>SMTPS (Implicit TLS)</option>
+            <option value="none"{% if settings.tls_mode == "none" %} selected{% endif %}>None (Plain SMTP)</option>
         </select>
     </p>
     <p>
         <label for="smtp_username">SMTP Username</label><br />
-        <input id="smtp_username" name="smtp_username" type="text" value="{{ smtp_username }}" />
+        <input id="smtp_username" name="smtp_username" type="text" value="{{ settings.smtp_username }}" />
     </p>
     <p>
         <label for="smtp_password">SMTP Password</label><br />
-        <input id="smtp_password" name="smtp_password" type="password" value="{{ smtp_password }}" />
+        <input id="smtp_password" name="smtp_password" type="password" value="{{ settings.smtp_password }}" />
     </p>
     <p>
         <label for="sender_name">Sender Name</label><br />
-        <input id="sender_name" name="sender_name" type="text" value="{{ sender_name }}" required />
+        <input id="sender_name" name="sender_name" type="text" value="{{ settings.sender_name }}" required />
     </p>
     <p>
         <label for="sender_email">Sender Email</label><br />
-        <input id="sender_email" name="sender_email" type="email" value="{{ sender_email }}" required />
+        <input id="sender_email" name="sender_email" type="email" value="{{ settings.sender_email }}" required />
     </p>
     <p>
         <label for="send_for_years">Send For Years</label><br />
-        <input id="send_for_years" name="send_for_years" type="number" min="0" value="{{ send_for_years }}" required />
+        <input id="send_for_years" name="send_for_years" type="number" min="0" value="{{ settings.send_for_years }}" required />
+    </p>
+    <p>
+        <label>
+            <input
+                name="disable_scheduled_mails"
+                type="checkbox"
+                value="1"
+                {% if settings.disable_scheduled_mails %}checked{% endif %}
+            />
+            Disable Scheduled Mails
+        </label><br />
+        <span class="muted">Prevents scheduled mails from being sent.</span>
     </p>
     <p>
         <label for="schedule_at_local_time">Schedule At Local Time</label><br />
@@ -51,7 +63,7 @@
             id="schedule_at_local_time"
             name="schedule_at_local_time"
             type="time"
-            value="{{ schedule_at_local_time }}"
+            value="{{ settings.schedule_at_local_time }}"
             required
         />
     </p>

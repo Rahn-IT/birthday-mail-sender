@@ -6,12 +6,8 @@ use lettre::{
 
 use crate::{
     error::AppError,
-    settings::{self, AppSettings},
+    settings::{self, AppSettings, TlsMode},
 };
-
-const TLS_MODE_STARTTLS: &str = "starttls";
-const TLS_MODE_SMTPS: &str = "smtps";
-const TLS_MODE_NONE: &str = "none";
 
 pub async fn send_mail(
     target_mail: &str,
@@ -85,27 +81,16 @@ fn validate_settings(settings: &AppSettings) -> Result<(), AppError> {
 fn build_smtp_transport(
     settings: &AppSettings,
 ) -> Result<lettre::transport::smtp::AsyncSmtpTransportBuilder, AppError> {
-    let tls_mode = normalize_tls_mode(&settings.tls_mode).unwrap_or(TLS_MODE_STARTTLS);
-    let builder = match tls_mode {
-        TLS_MODE_STARTTLS => {
+    let builder = match settings.tls_mode {
+        TlsMode::Starttls => {
             AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&settings.smtp_host)?
         }
-        TLS_MODE_SMTPS => AsyncSmtpTransport::<Tokio1Executor>::relay(&settings.smtp_host)?,
-        TLS_MODE_NONE => {
+        TlsMode::Smtps => AsyncSmtpTransport::<Tokio1Executor>::relay(&settings.smtp_host)?,
+        TlsMode::None => {
             AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(settings.smtp_host.clone())
         }
-        _ => unreachable!("unsupported TLS mode"),
     };
     Ok(builder.port(settings.smtp_port))
-}
-
-fn normalize_tls_mode(tls_mode: &str) -> Option<&'static str> {
-    match tls_mode.trim().to_ascii_lowercase().as_str() {
-        TLS_MODE_STARTTLS => Some(TLS_MODE_STARTTLS),
-        TLS_MODE_SMTPS => Some(TLS_MODE_SMTPS),
-        TLS_MODE_NONE => Some(TLS_MODE_NONE),
-        _ => None,
-    }
 }
 
 fn sanitize_header_value(value: &str) -> String {

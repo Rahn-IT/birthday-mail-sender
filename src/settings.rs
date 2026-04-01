@@ -1,9 +1,6 @@
 use std::path::Path;
 
-use axum::{
-    extract::State,
-    response::Html,
-};
+use axum::{extract::State, response::Html};
 use axum_extra::extract::Form;
 use chrono::NaiveTime;
 use serde::{Deserialize, Serialize};
@@ -11,9 +8,6 @@ use serde::{Deserialize, Serialize};
 use crate::{AppState, error::AppError, send_mail, users::CurrentUser};
 
 const SETTINGS_PATH: &str = "./db/settings.json";
-const TLS_MODE_STARTTLS: &str = "starttls";
-const TLS_MODE_SMTPS: &str = "smtps";
-const TLS_MODE_NONE: &str = "none";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -23,12 +17,10 @@ pub struct AppSettings {
     pub smtp_password: String,
     pub sender_name: String,
     pub sender_email: String,
-    #[serde(default = "default_send_for_years")]
     pub send_for_years: i64,
-    #[serde(default = "default_schedule_at_local_time")]
+    pub disable_scheduled_mails: bool,
     pub schedule_at_local_time: String,
-    #[serde(default = "default_tls_mode")]
-    pub tls_mode: String,
+    pub tls_mode: TlsMode,
 }
 
 impl Default for AppSettings {
@@ -40,11 +32,21 @@ impl Default for AppSettings {
             smtp_password: String::new(),
             sender_name: String::new(),
             sender_email: String::new(),
-            send_for_years: default_send_for_years(),
-            schedule_at_local_time: default_schedule_at_local_time(),
-            tls_mode: default_tls_mode(),
+            send_for_years: 2,
+            disable_scheduled_mails: false,
+            schedule_at_local_time: "09:00".to_string(),
+            tls_mode: TlsMode::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TlsMode {
+    #[default]
+    Starttls,
+    Smtps,
+    None,
 }
 
 #[derive(Debug, Deserialize)]
@@ -56,6 +58,7 @@ pub struct SettingsForm {
     sender_name: String,
     sender_email: String,
     send_for_years: String,
+    disable_scheduled_mails: Option<String>,
     schedule_at_local_time: String,
     tls_mode: String,
 }
@@ -72,15 +75,7 @@ struct SettingsView {
     error_message: Option<String>,
     has_success: bool,
     success_message: Option<String>,
-    smtp_host: String,
-    smtp_port: u16,
-    smtp_username: String,
-    smtp_password: String,
-    sender_name: String,
-    sender_email: String,
-    send_for_years: i64,
-    schedule_at_local_time: String,
-    tls_mode: String,
+    settings: AppSettings,
     test_recipient_email: String,
 }
 
@@ -133,8 +128,8 @@ pub async fn save(
             );
         }
     };
-    let tls_mode = match normalize_tls_mode(&form.tls_mode) {
-        Some(mode) => mode.to_string(),
+    let tls_mode = match parse_tls_mode(&form.tls_mode) {
+        Some(mode) => mode,
         None => {
             return render_settings_from_form(
                 &state,
@@ -197,6 +192,7 @@ pub async fn save(
         sender_name,
         sender_email,
         send_for_years,
+        disable_scheduled_mails: form.disable_scheduled_mails.is_some(),
         schedule_at_local_time,
         tls_mode,
     };
@@ -268,21 +264,15 @@ pub async fn ensure_settings_file() -> Result<(), AppError> {
         return Ok(());
     }
 
-    save_settings(&AppSettings::default()).await
+    save_settings(&AppSettings {
+        ..AppSettings::default()
+    })
+    .await
 }
 
 pub(crate) async fn load_settings() -> Result<AppSettings, AppError> {
-    if !tokio::fs::try_exists(SETTINGS_PATH).await? {
-        return Ok(AppSettings::default());
-    }
-
     let contents = tokio::fs::read_to_string(SETTINGS_PATH).await?;
-    if contents.trim().is_empty() {
-        return Ok(AppSettings::default());
-    }
-
-    let settings: AppSettings = serde_json::from_str(&contents)?;
-    Ok(settings)
+    Ok(serde_json::from_str(&contents)?)
 }
 
 async fn save_settings(settings: &AppSettings) -> Result<(), AppError> {
@@ -310,10 +300,11 @@ fn render_settings_from_form(
         smtp_password: form.smtp_password,
         sender_name: form.sender_name,
         sender_email: form.sender_email,
-        send_for_years: form.send_for_years.trim().parse::<i64>().unwrap_or(default_send_for_years()),
+        send_for_years: form.send_for_years.trim().parse::<i64>().unwrap_or(2),
+        disable_scheduled_mails: form.disable_scheduled_mails.is_some(),
         schedule_at_local_time: parse_schedule_at_local_time(&form.schedule_at_local_time)
-            .unwrap_or_else(default_schedule_at_local_time),
-        tls_mode: form.tls_mode,
+            .unwrap_or_else(|| "09:00".to_string()),
+        tls_mode: parse_tls_mode(&form.tls_mode).unwrap_or_default(),
     };
     render_settings(
         state,
@@ -343,32 +334,10 @@ fn render_settings(
         error_message: error_message.map(str::to_string),
         has_success: success_message.is_some(),
         success_message: success_message.map(str::to_string),
-        smtp_host: settings.smtp_host,
-        smtp_port: settings.smtp_port,
-        smtp_username: settings.smtp_username,
-        smtp_password: settings.smtp_password,
-        sender_name: settings.sender_name,
-        sender_email: settings.sender_email,
-        send_for_years: settings.send_for_years,
-        schedule_at_local_time: settings.schedule_at_local_time,
-        tls_mode: normalize_tls_mode(&settings.tls_mode)
-            .unwrap_or(TLS_MODE_STARTTLS)
-            .to_string(),
+        settings,
         test_recipient_email,
     })?;
     Ok(Html(rendered))
-}
-
-fn default_tls_mode() -> String {
-    TLS_MODE_STARTTLS.to_string()
-}
-
-fn default_send_for_years() -> i64 {
-    1
-}
-
-fn default_schedule_at_local_time() -> String {
-    "09:00".to_string()
 }
 
 fn parse_schedule_at_local_time(value: &str) -> Option<String> {
@@ -377,11 +346,11 @@ fn parse_schedule_at_local_time(value: &str) -> Option<String> {
     Some(parsed.format("%H:%M").to_string())
 }
 
-fn normalize_tls_mode(tls_mode: &str) -> Option<&'static str> {
+fn parse_tls_mode(tls_mode: &str) -> Option<TlsMode> {
     match tls_mode.trim().to_ascii_lowercase().as_str() {
-        TLS_MODE_STARTTLS => Some(TLS_MODE_STARTTLS),
-        TLS_MODE_SMTPS => Some(TLS_MODE_SMTPS),
-        TLS_MODE_NONE => Some(TLS_MODE_NONE),
+        "starttls" => Some(TlsMode::Starttls),
+        "smtps" => Some(TlsMode::Smtps),
+        "none" => Some(TlsMode::None),
         _ => None,
     }
 }
