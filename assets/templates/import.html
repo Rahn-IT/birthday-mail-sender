@@ -1,0 +1,27 @@
+{% extends 'layout.html' %} {% block title %}Import{% endblock %} {% block
+content %}
+<p class="muted">Select a spreadsheet file to import.</p>
+{% if has_error and error_message %}
+<p class="muted">{{ error_message }}</p>
+{% endif %}
+<form
+    method="post"
+    action="/import"
+    class="plan-form"
+    enctype="multipart/form-data"
+>
+    <p>
+        <label for="spreadsheet_file">Spreadsheet File</label><br />
+        <input
+            id="spreadsheet_file"
+            name="spreadsheet_file"
+            type="file"
+            accept=".xls,.xlsx,.xlsm,.xlsb,.ods"
+            required
+        />
+    </p>
+    <div class="toolbar">
+        <input class="btn btn-primary" type="submit" value="Start Import" />
+    </div>
+</form>
+{% endblock %}

@@ -13,6 +13,7 @@ use sqlx::{Sqlite, SqlitePool, migrate::MigrateDatabase};
 
 pub mod error;
 mod birthday_scheduler;
+mod import_people;
 mod mail_template;
 mod placeholders;
 mod people;
@@ -43,6 +44,7 @@ async fn main() {
         Sqlite::create_database(DB_PATH).await.unwrap();
     }
     settings::ensure_settings_file().await.unwrap();
+    import_people::ensure_uploads_dir().await.unwrap();
 
     let db = SqlitePool::connect(DB_PATH).await.unwrap();
     sqlx::migrate!("./migrations").run(&db).await.unwrap();
@@ -62,6 +64,10 @@ async fn main() {
     let birthday_scheduler_db = state.db.clone();
     tokio::spawn(async move {
         birthday_scheduler::run_daily_scheduler(birthday_scheduler_db).await;
+    });
+
+    tokio::spawn(async move {
+        import_people::run_upload_cleanup_scheduler().await;
     });
 
     // build our application with a route
@@ -113,6 +119,7 @@ fn router() -> Router<AppState> {
         .route("/setup", get(users::setup_get).post(users::setup_post))
         .route("/login", get(users::login_get).post(users::login_post))
         .route("/logout", post(users::logout_post))
+        .route("/import", get(import_people::index).post(import_people::upload))
         .route(
             "/static/style.css",
             get((
