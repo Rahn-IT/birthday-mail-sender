@@ -18,6 +18,14 @@
         <input id="smtp_port" name="smtp_port" type="number" min="1" max="65535" value="{{ smtp_port }}" required />
     </p>
     <p>
+        <label for="tls_mode">TLS Mode</label><br />
+        <select id="tls_mode" name="tls_mode" required>
+            <option value="starttls"{% if tls_mode == "starttls" %} selected{% endif %}>STARTTLS</option>
+            <option value="smtps"{% if tls_mode == "smtps" %} selected{% endif %}>SMTPS (Implicit TLS)</option>
+            <option value="none"{% if tls_mode == "none" %} selected{% endif %}>None (Plain SMTP)</option>
+        </select>
+    </p>
+    <p>
         <label for="smtp_username">SMTP Username</label><br />
         <input id="smtp_username" name="smtp_username" type="text" value="{{ smtp_username }}" />
     </p>
@@ -46,14 +54,6 @@
             value="{{ schedule_at_local_time }}"
             required
         />
-    </p>
-    <p>
-        <label for="tls_mode">TLS Mode</label><br />
-        <select id="tls_mode" name="tls_mode" required>
-            <option value="starttls"{% if tls_mode == "starttls" %} selected{% endif %}>STARTTLS</option>
-            <option value="smtps"{% if tls_mode == "smtps" %} selected{% endif %}>SMTPS (Implicit TLS)</option>
-            <option value="none"{% if tls_mode == "none" %} selected{% endif %}>None (Plain SMTP)</option>
-        </select>
     </p>
     <div class="toolbar">
         <input class="btn btn-primary" type="submit" value="Save Settings" />
