@@ -79,16 +79,8 @@ impl ImportTransform {
         let trimmed = value.trim();
         match self {
             Self::None => trimmed.to_string(),
-            Self::SelectFirstWord => trimmed
-                .split_whitespace()
-                .next()
-                .unwrap_or("")
-                .to_string(),
-            Self::SelectLastWord => trimmed
-                .split_whitespace()
-                .last()
-                .unwrap_or("")
-                .to_string(),
+            Self::SelectFirstWord => trimmed.split_whitespace().next().unwrap_or("").to_string(),
+            Self::SelectLastWord => trimmed.split_whitespace().last().unwrap_or("").to_string(),
         }
     }
 }
@@ -152,8 +144,12 @@ pub async fn upload(
         return Ok(Redirect::to(&format!("/import/{}", filename)).into_response());
     }
 
-    render_index_with_error(&state, &current_user, "Please choose a spreadsheet file to upload.")
-        .map(IntoResponse::into_response)
+    render_index_with_error(
+        &state,
+        &current_user,
+        "Please choose a spreadsheet file to upload.",
+    )
+    .map(IntoResponse::into_response)
 }
 
 pub async fn show(
@@ -167,15 +163,17 @@ pub async fn show(
     if !tokio::fs::try_exists(&upload_path).await? {
         return Err(AppError::not_found_for(
             "Import File",
-            format!("No uploaded spreadsheet exists for file: {}", validated_filename),
+            format!(
+                "No uploaded spreadsheet exists for file: {}",
+                validated_filename
+            ),
         ));
     }
 
-    let (sheet_name, available_columns) = tokio::task::spawn_blocking(move || {
-        load_available_columns_from_file(&upload_path)
-    })
-    .await
-    .map_err(|err| AppError::internal(anyhow::anyhow!(err.to_string())))??;
+    let (sheet_name, available_columns) =
+        tokio::task::spawn_blocking(move || load_available_columns_from_file(&upload_path))
+            .await
+            .map_err(|err| AppError::internal(anyhow::anyhow!(err.to_string())))??;
 
     let template = state
         .jinja
@@ -223,7 +221,10 @@ pub async fn import(
     if !tokio::fs::try_exists(&upload_path).await? {
         return Err(AppError::not_found_for(
             "Import File",
-            format!("No uploaded spreadsheet exists for file: {}", validated_filename),
+            format!(
+                "No uploaded spreadsheet exists for file: {}",
+                validated_filename
+            ),
         ));
     }
 
@@ -272,7 +273,10 @@ async fn delete_old_uploads() -> Result<u64, AppError> {
         let metadata = match entry.metadata().await {
             Ok(value) => value,
             Err(err) => {
-                eprintln!("Upload cleanup: could not read metadata for {:?}: {}", path, err);
+                eprintln!(
+                    "Upload cleanup: could not read metadata for {:?}: {}",
+                    path, err
+                );
                 continue;
             }
         };
@@ -284,7 +288,10 @@ async fn delete_old_uploads() -> Result<u64, AppError> {
         let modified = match metadata.modified() {
             Ok(value) => value,
             Err(err) => {
-                eprintln!("Upload cleanup: could not read modified time for {:?}: {}", path, err);
+                eprintln!(
+                    "Upload cleanup: could not read modified time for {:?}: {}",
+                    path, err
+                );
                 continue;
             }
         };
@@ -401,11 +408,13 @@ fn load_people_from_import_file(
     let mut imported_people = Vec::new();
 
     for row in &rows {
-        let first_name = match required_string_cell(row, first_name_index, form.first_name_transform)? {
-            Some(value) => value,
-            None => continue,
-        };
-        let last_name = match required_string_cell(row, last_name_index, form.last_name_transform)? {
+        let first_name =
+            match required_string_cell(row, first_name_index, form.first_name_transform)? {
+                Some(value) => value,
+                None => continue,
+            };
+        let last_name = match required_string_cell(row, last_name_index, form.last_name_transform)?
+        {
             Some(value) => value,
             None => continue,
         };
@@ -453,12 +462,17 @@ fn load_sheet(path: &Path) -> Result<(String, Vec<String>, Vec<Vec<Data>>), AppE
         .filter_map(data_to_column_name)
         .collect::<Vec<String>>();
 
-    let rows = rows_iter.map(|row| row.to_vec()).collect::<Vec<Vec<Data>>>();
+    let rows = rows_iter
+        .map(|row| row.to_vec())
+        .collect::<Vec<Vec<Data>>>();
 
     Ok((sheet_name, available_columns, rows))
 }
 
-async fn import_people_into_db(db: &SqlitePool, imported_people: Vec<ImportedPerson>) -> Result<(), AppError> {
+async fn import_people_into_db(
+    db: &SqlitePool,
+    imported_people: Vec<ImportedPerson>,
+) -> Result<(), AppError> {
     let current_year = chrono::Local::now().year() as i64;
     let mut tx = db.begin().await?;
 
@@ -529,7 +543,9 @@ fn data_to_column_name(data: &Data) -> Option<String> {
 
 fn validate_transform(transform: ImportTransform) -> Result<(), AppError> {
     match transform {
-        ImportTransform::None | ImportTransform::SelectFirstWord | ImportTransform::SelectLastWord => Ok(()),
+        ImportTransform::None
+        | ImportTransform::SelectFirstWord
+        | ImportTransform::SelectLastWord => Ok(()),
     }
 }
 
@@ -537,7 +553,9 @@ fn column_index(columns: &[String], selected: &str) -> Result<usize, AppError> {
     columns
         .iter()
         .position(|column| column == selected)
-        .ok_or_else(|| AppError::conflict(format!("Selected import column not found: {}", selected)))
+        .ok_or_else(|| {
+            AppError::conflict(format!("Selected import column not found: {}", selected))
+        })
 }
 
 fn required_string_cell(
@@ -548,8 +566,7 @@ fn required_string_cell(
     let value = row
         .get(index)
         .map(cell_to_string)
-        .transpose()
-        ?
+        .transpose()?
         .unwrap_or_default();
     let transformed = transform.apply(&value);
     if transformed.is_empty() {
@@ -592,10 +609,7 @@ fn required_date_cell(
     }
 
     let date = cell_to_date(cell, transform).ok_or_else(|| {
-        AppError::conflict(format!(
-            "Invalid birthday value in import data: {}",
-            cell
-        ))
+        AppError::conflict(format!("Invalid birthday value in import data: {}", cell))
     })?;
 
     Ok(Some(date.format("%Y-%m-%d").to_string()))
@@ -626,13 +640,21 @@ fn parse_date_text(value: &str) -> Option<NaiveDate> {
         return None;
     }
 
-    [
-        "%Y-%m-%d",
-        "%d.%m.%Y",
-        "%d/%m/%Y",
-        "%m/%d/%Y",
-        "%d-%m-%Y",
-    ]
-    .into_iter()
-    .find_map(|format| NaiveDate::parse_from_str(value, format).ok())
+    let current_year = chrono::Local::now().year();
+
+    ["%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y"]
+        .into_iter()
+        .find_map(|format| {
+            let date = NaiveDate::parse_from_str(value, format).ok()?;
+            let mut year = date.year();
+
+            if year <= 100 {
+                year += 2000;
+            }
+            if year > current_year {
+                year -= 100;
+            }
+
+            NaiveDate::from_ymd_opt(year, date.month(), date.day())
+        })
 }
