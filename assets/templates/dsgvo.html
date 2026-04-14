@@ -25,7 +25,7 @@ content %} {% if has_error and error_message %}
         <input
             class="btn"
             type="submit"
-            value="Report"
+            value="Download Report"
             formaction="/dsgvo/download-report"
         />
         <input
@@ -34,7 +34,18 @@ content %} {% if has_error and error_message %}
             value="Delete"
             formaction="/dsgvo/delete-by-email"
         />
-        <input class="btn btn-danger" type="submit" value="Block" disabled />
+        <input
+            class="btn btn-danger"
+            type="submit"
+            value="Block"
+            formaction="/dsgvo/block-mail"
+        />
+        <input
+            class="btn"
+            type="submit"
+            value="Unblock"
+            formaction="/dsgvo/unblock-mail"
+        />
     </div>
 </form>
 {% if report %}

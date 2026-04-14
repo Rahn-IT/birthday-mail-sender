@@ -132,6 +132,66 @@ pub async fn download_report(
     Ok((headers, report).into_response())
 }
 
+pub async fn block_mail_post(
+    State(state): State<AppState>,
+    current_user: CurrentUser,
+    Form(form): Form<CheckMailForm>,
+) -> Result<Html<String>, AppError> {
+    let email = form.email.trim().to_string();
+    if email.is_empty() || !email.contains('@') {
+        return render_page(
+            &state,
+            &current_user,
+            email,
+            None,
+            Some("Please enter a valid email address."),
+            None,
+        );
+    }
+
+    block_mail(&state.db, &email).await?;
+    render_page(
+        &state,
+        &current_user,
+        email,
+        None,
+        None,
+        Some("Email has been blocked and matching data has been deleted."),
+    )
+}
+
+pub async fn unblock_mail_post(
+    State(state): State<AppState>,
+    current_user: CurrentUser,
+    Form(form): Form<CheckMailForm>,
+) -> Result<Html<String>, AppError> {
+    let email = form.email.trim().to_string();
+    if email.is_empty() || !email.contains('@') {
+        return render_page(
+            &state,
+            &current_user,
+            email,
+            None,
+            Some("Please enter a valid email address."),
+            None,
+        );
+    }
+
+    let removed = unblock_mail(&state.db, &email).await?;
+    render_page(
+        &state,
+        &current_user,
+        email,
+        None,
+        None,
+        Some(if removed {
+            "Email has been unblocked."
+        } else {
+            "Email was not blocked."
+        }),
+    )
+}
+
 fn render_page(
     state: &AppState,
     current_user: &CurrentUser,
@@ -222,6 +282,21 @@ pub async fn block_mail(db: &SqlitePool, email: &str) -> Result<(), AppError> {
     .await?;
 
     Ok(())
+}
+
+pub async fn unblock_mail(db: &SqlitePool, email: &str) -> Result<bool, AppError> {
+    let sha_hash = peppered_mail_hash(email).await?;
+    let result = sqlx::query(
+        r#"
+        DELETE FROM blocked
+        WHERE sha_hash = ?
+        "#
+    )
+    .bind(sha_hash)
+    .execute(db)
+    .await?;
+
+    Ok(result.rows_affected() > 0)
 }
 
 pub async fn generate_report(db: &SqlitePool, email: &str) -> Result<String, AppError> {
