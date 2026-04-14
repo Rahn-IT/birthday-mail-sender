@@ -1,0 +1,10 @@
+volumes:
+  db:
+
+services:
+  app:
+    image: ghcr.io/rahn-it/birthday-mail-sender:master
+    volumes:
+      - db:/app/db
+    ports:
+      - 4046:4046
