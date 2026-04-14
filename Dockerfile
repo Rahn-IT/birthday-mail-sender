@@ -6,6 +6,7 @@ COPY ./build.rs .
 COPY ./src ./src
 COPY ./assets ./assets
 COPY ./migrations ./migrations
+ENV DATABASE_URL="sqlite://dev.sqlite"
 RUN cargo install sqlx-cli --no-default-features --features sqlite
 RUN cargo sqlx database create
 RUN cargo sqlx migrate run
