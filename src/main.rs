@@ -13,6 +13,7 @@ use sqlx::{Sqlite, SqlitePool, migrate::MigrateDatabase};
 
 pub mod error;
 mod birthday_scheduler;
+mod dsgvo;
 mod import_people;
 mod mail_template;
 mod placeholders;
@@ -94,7 +95,9 @@ fn router() -> Router<AppState> {
             "/people/edit/{id}",
             get(people::edit_get).post(people::edit_post),
         )
-        .route("/people/{id}", get(people::show));
+        .route("/people/{id}", get(people::show))
+        .route("/dsgvo", get(dsgvo::index))
+        .route("/dsgvo/delete-by-email", post(dsgvo::delete_by_email));
 
     let admin_routes = Router::new()
         .route("/schedule/send", post(birthday_scheduler::send))

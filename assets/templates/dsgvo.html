@@ -1,0 +1,33 @@
+{% extends 'layout.html' %} {% block title %}DSGVO{% endblock title %} {% block
+content %} {% if has_error and error_message %}
+<p class="muted">{{ error_message }}</p>
+{% endif %} {% if has_success and success_message %}
+<p class="muted">{{ success_message }}</p>
+{% endif %}
+<h2>Delete Data For Email</h2>
+<form class="plan-form" method="post" action="/dsgvo/delete-by-email">
+    <p>
+        <label for="dsgvo_email">Email Address</label><br />
+        <input
+            id="dsgvo_email"
+            name="email"
+            type="email"
+            value="{{ email }}"
+            required
+        />
+    </p>
+    <div class="toolbar">
+        <input class="btn btn-primary" type="submit" value="Delete" />
+    </div>
+</form>
+<h2>DSGVO Block</h2>
+<form class="plan-form">
+    <p>
+        <label for="dsgvo_block_email">Email Address</label><br />
+        <input id="dsgvo_block_email" name="email" type="email" required />
+    </p>
+    <div class="toolbar">
+        <input class="btn" type="submit" value="Save DSGVO Block" disabled />
+    </div>
+</form>
+{% endblock %}
