@@ -5,4 +5,5 @@
 *.sqlite-shm
 *.sqlite-wal
 *.vcard
-*/**.env
+**/.env
+!/.env
