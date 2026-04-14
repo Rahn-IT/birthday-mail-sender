@@ -4,8 +4,7 @@ content %} {% if has_error and error_message %}
 {% endif %} {% if has_success and success_message %}
 <p class="muted">{{ success_message }}</p>
 {% endif %}
-<h2>Delete Data For Email</h2>
-<form class="plan-form" method="post" action="/dsgvo/delete-by-email">
+<form class="plan-form" method="post">
     <p>
         <label for="dsgvo_email">Email Address</label><br />
         <input
@@ -17,17 +16,27 @@ content %} {% if has_error and error_message %}
         />
     </p>
     <div class="toolbar">
-        <input class="btn btn-primary" type="submit" value="Delete" />
+        <input
+            class="btn"
+            type="submit"
+            value="Check"
+            formaction="/dsgvo/check-mail"
+        />
+        <input
+            class="btn"
+            type="submit"
+            value="Report"
+            formaction="/dsgvo/download-report"
+        />
+        <input
+            class="btn btn-danger"
+            type="submit"
+            value="Delete"
+            formaction="/dsgvo/delete-by-email"
+        />
+        <input class="btn btn-danger" type="submit" value="Block" disabled />
     </div>
 </form>
-<h2>DSGVO Block</h2>
-<form class="plan-form">
-    <p>
-        <label for="dsgvo_block_email">Email Address</label><br />
-        <input id="dsgvo_block_email" name="email" type="email" required />
-    </p>
-    <div class="toolbar">
-        <input class="btn" type="submit" value="Save DSGVO Block" disabled />
-    </div>
-</form>
-{% endblock %}
+{% if report %}
+<pre>{{ report }}</pre>
+{% endif %} {% endblock %}

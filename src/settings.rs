@@ -4,6 +4,7 @@ use axum::{extract::State, response::Html};
 use axum_extra::extract::Form;
 use chrono::{Datelike, Local, NaiveTime};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::{AppState, error::AppError, send_mail, users::CurrentUser};
 
@@ -21,6 +22,7 @@ pub struct AppSettings {
     pub disable_scheduled_mails: bool,
     pub schedule_at_local_time: String,
     pub tls_mode: TlsMode,
+    pub pepper: String,
 }
 
 impl Default for AppSettings {
@@ -36,6 +38,7 @@ impl Default for AppSettings {
             disable_scheduled_mails: false,
             schedule_at_local_time: "09:00".to_string(),
             tls_mode: TlsMode::default(),
+            pepper: generate_pepper(),
         }
     }
 }
@@ -99,6 +102,7 @@ pub async fn save(
     current_user: CurrentUser,
     Form(form): Form<SettingsForm>,
 ) -> Result<Html<String>, AppError> {
+    let existing_settings = load_settings().await?;
     let smtp_host = form.smtp_host.trim().to_string();
     let smtp_username = form.smtp_username.trim().to_string();
     let smtp_password = form.smtp_password.trim().to_string();
@@ -195,6 +199,7 @@ pub async fn save(
         disable_scheduled_mails: form.disable_scheduled_mails.is_some(),
         schedule_at_local_time,
         tls_mode,
+        pepper: existing_settings.pepper,
     };
 
     save_settings(&settings).await?;
@@ -349,8 +354,20 @@ fn render_settings_from_form(
     error_message: Option<&str>,
     success_message: Option<&str>,
 ) -> Result<Html<String>, AppError> {
+    let settings = settings_from_form(form, String::new());
+    render_settings(
+        state,
+        current_user,
+        settings,
+        error_message,
+        success_message,
+        String::new(),
+    )
+}
+
+fn settings_from_form(form: SettingsForm, pepper: String) -> AppSettings {
     let smtp_port = form.smtp_port.trim().parse::<u16>().unwrap_or(587);
-    let settings = AppSettings {
+    AppSettings {
         smtp_host: form.smtp_host,
         smtp_port,
         smtp_username: form.smtp_username,
@@ -362,15 +379,8 @@ fn render_settings_from_form(
         schedule_at_local_time: parse_schedule_at_local_time(&form.schedule_at_local_time)
             .unwrap_or_else(|| "09:00".to_string()),
         tls_mode: parse_tls_mode(&form.tls_mode).unwrap_or_default(),
-    };
-    render_settings(
-        state,
-        current_user,
-        settings,
-        error_message,
-        success_message,
-        String::new(),
-    )
+        pepper,
+    }
 }
 
 fn render_settings(
@@ -410,4 +420,8 @@ fn parse_tls_mode(tls_mode: &str) -> Option<TlsMode> {
         "none" => Some(TlsMode::None),
         _ => None,
     }
+}
+
+fn generate_pepper() -> String {
+    Uuid::new_v4().to_string()
 }

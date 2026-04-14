@@ -97,7 +97,9 @@ fn router() -> Router<AppState> {
         )
         .route("/people/{id}", get(people::show))
         .route("/dsgvo", get(dsgvo::index))
-        .route("/dsgvo/delete-by-email", post(dsgvo::delete_by_email));
+        .route("/dsgvo/delete-by-email", post(dsgvo::delete_by_email))
+        .route("/dsgvo/check-mail", post(dsgvo::check_mail))
+        .route("/dsgvo/download-report", post(dsgvo::download_report));
 
     let admin_routes = Router::new()
         .route("/schedule/send", post(birthday_scheduler::send))
