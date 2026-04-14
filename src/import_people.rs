@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
-use crate::{AppState, error::AppError, users::CurrentUser};
+use crate::{AppState, dsgvo, error::AppError, users::CurrentUser};
 
 const UPLOADS_PATH: &str = "./db/uploads";
 const MAX_UPLOAD_AGE: Duration = Duration::from_secs(60 * 60);
@@ -477,6 +477,10 @@ async fn import_people_into_db(
     let mut tx = db.begin().await?;
 
     for person in imported_people {
+        if dsgvo::mail_is_blocked(db, &person.email).await? {
+            continue;
+        }
+
         let email_lookup = person.email.to_ascii_lowercase();
         let existing_id = sqlx::query_scalar!(
             r#"

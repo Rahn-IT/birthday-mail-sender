@@ -8,7 +8,7 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::{
-    AppState,
+    AppState, dsgvo,
     error::AppError,
     settings,
     template_mailer::{self, TemplateValues},
@@ -100,6 +100,14 @@ pub async fn send_scheduled_mails(db: &SqlitePool) -> Result<u64, AppError> {
             .last_sent_at
             .is_some_and(|value| value >= recent_threshold)
         {
+            continue;
+        }
+
+        if dsgvo::mail_is_blocked(db, &recipient.email).await? {
+            eprintln!(
+                "[WARNING]: skipped blocked email for mail {}.",
+                recipient.email
+            );
             continue;
         }
 

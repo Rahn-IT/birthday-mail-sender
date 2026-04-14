@@ -6,7 +6,7 @@ use axum_extra::extract::Form;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{AppState, error::AppError, users::CurrentUser};
+use crate::{AppState, dsgvo, error::AppError, users::CurrentUser};
 
 const PEOPLE_PAGE_SIZE: i64 = 25;
 
@@ -189,6 +189,26 @@ pub async fn create_post(
     let email = form.email.trim().to_string();
     let birthday = form.birthday.trim().to_string();
 
+    if dsgvo::mail_is_blocked(&state.db, &email).await? {
+        return render_form(
+            &state,
+            &current_user,
+            PersonFormView {
+                id: None,
+                first_name,
+                last_name,
+                greeting,
+                email,
+                birthday,
+            },
+            Some(
+                "This email address is DSGVO-blocked and cannot be saved. Delete this entry instead if it should be removed.",
+            ),
+            FormPageMode::Create,
+        )
+        .map(IntoResponse::into_response);
+    }
+
     let id = Uuid::new_v4();
     sqlx::query!(
         r#"
@@ -246,6 +266,26 @@ pub async fn edit_post(
     let greeting = form.greeting.trim().to_string();
     let email = form.email.trim().to_string();
     let birthday = form.birthday.trim().to_string();
+
+    if dsgvo::mail_is_blocked(&state.db, &email).await? {
+        return render_form(
+            &state,
+            &current_user,
+            PersonFormView {
+                id: Some(id),
+                first_name,
+                last_name,
+                greeting,
+                email,
+                birthday,
+            },
+            Some(
+                "This email address is DSGVO-blocked and cannot be saved. Delete this entry instead if it should be removed.",
+            ),
+            FormPageMode::Edit,
+        )
+        .map(IntoResponse::into_response);
+    }
 
     sqlx::query!(
         r#"
