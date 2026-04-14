@@ -86,4 +86,13 @@
         <input class="btn" type="submit" value="Send Test Email" />
     </div>
 </form>
+<form method="post" action="/settings/delete-expired-people" class="plan-form">
+    <p class="muted">
+        Deletes all people whose send window has ended based on the current
+        <strong>Send For Years</strong> value.
+    </p>
+    <div class="toolbar">
+        <input class="btn" type="submit" value="Delete Expired People" />
+    </div>
+</form>
 {% endblock %}

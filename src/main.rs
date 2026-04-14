@@ -100,6 +100,10 @@ fn router() -> Router<AppState> {
         .route("/schedule/send", post(birthday_scheduler::send))
         .route("/users", get(users::index).post(users::create_post))
         .route("/settings", get(settings::index).post(settings::save))
+        .route(
+            "/settings/delete-expired-people",
+            post(settings::delete_expired_people),
+        )
         .route("/settings/test-mail", post(settings::send_test_mail))
         .route(
             "/template",

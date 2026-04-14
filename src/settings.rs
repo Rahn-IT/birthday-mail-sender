@@ -2,7 +2,7 @@ use std::path::Path;
 
 use axum::{extract::State, response::Html};
 use axum_extra::extract::Form;
-use chrono::NaiveTime;
+use chrono::{Datelike, Local, NaiveTime};
 use serde::{Deserialize, Serialize};
 
 use crate::{AppState, error::AppError, send_mail, users::CurrentUser};
@@ -259,6 +259,26 @@ pub async fn send_test_mail(
     }
 }
 
+pub async fn delete_expired_people(
+    State(state): State<AppState>,
+    current_user: CurrentUser,
+) -> Result<Html<String>, AppError> {
+    let settings = load_settings().await?;
+    let deleted_count = prune_people_outside_send_window(&state, settings.send_for_years).await?;
+
+    render_settings(
+        &state,
+        &current_user,
+        settings,
+        None,
+        Some(&format!(
+            "Deleted {} people outside the send-for-years timeframe.",
+            deleted_count
+        )),
+        String::new(),
+    )
+}
+
 pub async fn ensure_settings_file() -> Result<(), AppError> {
     if tokio::fs::try_exists(SETTINGS_PATH).await? {
         return Ok(());
@@ -283,6 +303,43 @@ async fn save_settings(settings: &AppSettings) -> Result<(), AppError> {
     let json = serde_json::to_string_pretty(settings)?;
     tokio::fs::write(SETTINGS_PATH, format!("{}\n", json)).await?;
     Ok(())
+}
+
+async fn prune_people_outside_send_window(
+    state: &AppState,
+    send_for_years: i64,
+) -> Result<u64, AppError> {
+    let current_year = i64::from(Local::now().year());
+    let mut tx = state.db.begin().await?;
+
+    sqlx::query!(
+        r#"
+        DELETE FROM sent
+        WHERE user_id IN (
+            SELECT id
+            FROM people
+            WHERE ? >= start_year + ?
+        )
+        "#,
+        current_year,
+        send_for_years
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    let result = sqlx::query!(
+        r#"
+        DELETE FROM people
+        WHERE ? >= start_year + ?
+        "#,
+        current_year,
+        send_for_years
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(result.rows_affected())
 }
 
 fn render_settings_from_form(
