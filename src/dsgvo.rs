@@ -4,6 +4,7 @@ use axum::{
     response::{Html, IntoResponse, Response},
 };
 use axum_extra::extract::Form;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
@@ -67,7 +68,7 @@ pub async fn delete_by_email(
     render_page(
         &state,
         &current_user,
-        String::new(),
+        email,
         None,
         None,
         Some(&format!(
@@ -94,7 +95,10 @@ pub async fn check_mail(
         );
     }
 
-    let report = generate_report(&state.db, &email).await?;
+    let mut report = generate_report(&state.db, &email).await?;
+    if mail_is_blocked(&state.db, &email).await? {
+        report.push_str("\n\nDSGVO-Block active");
+    }
     render_page(
         &state,
         &current_user,
@@ -356,7 +360,11 @@ pub async fn generate_report(db: &SqlitePool, email: &str) -> Result<String, App
     .fetch_all(db)
     .await?;
 
-    let mut report = format!("DSGVO-Report for {}", normalized_email);
+    let generated_at_utc = Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+    let mut report = format!(
+        "DSGVO-Report for {}\nGenerated at: {}",
+        normalized_email, generated_at_utc
+    );
     if people_rows.is_empty() && sent_rows.is_empty() {
         report.push_str("\n\nno data found");
         return Ok(report);
