@@ -16,6 +16,7 @@ use crate::{
 };
 
 const TEMPLATE_PATH: &str = "./db/template.eml";
+const TEMPLATE_SUBJECT_PATH: &str = "./db/template_subject.txt";
 const RECENT_SEND_WINDOW_SECONDS: i64 = 60 * 60 * 72;
 
 #[derive(Debug)]
@@ -91,6 +92,7 @@ pub async fn send_scheduled_mails(db: &SqlitePool) -> Result<u64, AppError> {
     }
 
     let template_bytes = tokio::fs::read(TEMPLATE_PATH).await?;
+    let subject = load_template_subject().await?;
     let recipients = load_scheduled_recipients(db, settings.send_for_years).await?;
     let mut sent_count = 0_u64;
     let recent_threshold = unix_now().saturating_sub(RECENT_SEND_WINDOW_SECONDS);
@@ -119,6 +121,7 @@ pub async fn send_scheduled_mails(db: &SqlitePool) -> Result<u64, AppError> {
 
         template_mailer::send_template_mail_with_loaded_settings(
             &template_bytes,
+            &subject,
             &recipient.email,
             &values,
         )
@@ -137,6 +140,14 @@ pub async fn send_scheduled_mails(db: &SqlitePool) -> Result<u64, AppError> {
     }
 
     Ok(sent_count)
+}
+
+async fn load_template_subject() -> Result<String, AppError> {
+    match tokio::fs::read_to_string(TEMPLATE_SUBJECT_PATH).await {
+        Ok(value) => Ok(value.trim().to_string()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(err) => Err(err.into()),
+    }
 }
 
 pub async fn run_daily_scheduler(db: SqlitePool) {

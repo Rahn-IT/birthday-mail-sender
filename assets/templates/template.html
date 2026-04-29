@@ -20,6 +20,21 @@
         {% endif %}
     </div>
 </form>
+<form method="post" action="/template/subject" class="plan-form">
+    <p>
+        <label for="subject">Template Subject</label><br />
+        <input
+            id="subject"
+            name="subject"
+            type="text"
+            value="{{ subject }}"
+            placeholder="Happy Birthday"
+        />
+    </p>
+    <div class="toolbar">
+        <input class="btn btn-primary" type="submit" value="Save Subject" />
+    </div>
+</form>
 <form method="post" action="/template/test-mail" class="plan-form">
     <p>
         <label for="test_recipient_email">Template Test Recipient</label><br />

@@ -1,5 +1,4 @@
 use anyhow::anyhow;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 
 use crate::{error::AppError, placeholders, send_mail};
 
@@ -11,14 +10,13 @@ pub struct TemplateValues<'a> {
 
 async fn send_template_mail(
     template_bytes: &[u8],
+    subject_template: &str,
     recipient_email: &str,
     values: &TemplateValues<'_>,
 ) -> Result<(), AppError> {
     let parsed = parse_template(template_bytes)?;
 
-    let subject = replace_placeholders(&parsed.subject, values);
-    println!("subject: {}", subject);
-
+    let subject = replace_placeholders(subject_template, values);
     let body = replace_placeholders(&parsed.body, values);
 
     let subject = if subject.trim().is_empty() {
@@ -37,14 +35,16 @@ async fn send_template_mail(
 
 pub async fn send_template_mail_with_loaded_settings(
     template_bytes: &[u8],
+    subject_template: &str,
     recipient_email: &str,
     values: &TemplateValues<'_>,
 ) -> Result<(), AppError> {
-    send_template_mail(template_bytes, recipient_email, values).await
+    send_template_mail(template_bytes, subject_template, recipient_email, values).await
 }
 
 pub async fn send_template_test_mail_with_loaded_settings(
     template_bytes: &[u8],
+    subject_template: &str,
     recipient_email: &str,
 ) -> Result<(), AppError> {
     let values = TemplateValues {
@@ -52,11 +52,10 @@ pub async fn send_template_test_mail_with_loaded_settings(
         last_name: "Doe",
         first_name: "John",
     };
-    send_template_mail(template_bytes, recipient_email, &values).await
+    send_template_mail(template_bytes, subject_template, recipient_email, &values).await
 }
 
 struct ParsedTemplate {
-    subject: String,
     content_type: String,
     body: String,
 }
@@ -66,19 +65,15 @@ fn parse_template(template_bytes: &[u8]) -> Result<ParsedTemplate, AppError> {
     let (headers_raw, body_raw) = split_headers_and_body(&raw)
         .ok_or_else(|| AppError::internal(anyhow!("Template has no header/body separator.")))?;
 
-    let mut subject = String::new();
     let mut content_type = "text/plain".to_string();
 
     for (name, value) in parse_headers(headers_raw) {
-        if name.eq_ignore_ascii_case("subject") {
-            subject = decode_utf8_encoded_words(&value);
-        } else if name.eq_ignore_ascii_case("content-type") {
+        if name.eq_ignore_ascii_case("content-type") {
             content_type = value;
         }
     }
 
     Ok(ParsedTemplate {
-        subject,
         content_type,
         body: body_raw.to_string(),
     })
@@ -129,113 +124,12 @@ fn parse_headers(headers_raw: &str) -> Vec<(String, String)> {
     out
 }
 
-fn decode_utf8_encoded_words(input: &str) -> String {
-    let mut output = String::with_capacity(input.len());
-    let mut cursor = 0;
-    let mut last_was_encoded = false;
-
-    while let Some(relative_start) = input[cursor..].find("=?") {
-        let start = cursor + relative_start;
-        let between = &input[cursor..start];
-
-        if !(last_was_encoded && between.chars().all(char::is_whitespace)) {
-            output.push_str(between);
-        }
-
-        if let Some((decoded, end)) = decode_utf8_encoded_word(&input[start..]) {
-            output.push_str(&decoded);
-            cursor = start + end;
-            last_was_encoded = true;
-        } else {
-            output.push_str("=?");
-            cursor = start + 2;
-            last_was_encoded = false;
-        }
-    }
-
-    output.push_str(&input[cursor..]);
-    output
-}
-
-fn decode_utf8_encoded_word(input: &str) -> Option<(String, usize)> {
-    if !input.starts_with("=?") {
-        return None;
-    }
-
-    let charset_end = input[2..].find('?')? + 2;
-    let charset = &input[2..charset_end];
-    if !charset.eq_ignore_ascii_case("utf-8") && !charset.eq_ignore_ascii_case("utf8") {
-        return None;
-    }
-
-    let encoding_start = charset_end + 1;
-    let encoding_end = input[encoding_start..].find('?')? + encoding_start;
-    let encoding = &input[encoding_start..encoding_end];
-    let encoded_start = encoding_end + 1;
-    let encoded_end = input[encoded_start..].find("?=")? + encoded_start;
-    let encoded = &input[encoded_start..encoded_end];
-
-    let bytes = if encoding.eq_ignore_ascii_case("b") {
-        BASE64_STANDARD.decode(encoded).ok()?
-    } else if encoding.eq_ignore_ascii_case("q") {
-        decode_q_encoded_word(encoded)?
-    } else {
-        return None;
-    };
-
-    let decoded = String::from_utf8(bytes).ok()?;
-    Some((decoded, encoded_end + 2))
-}
-
-fn decode_q_encoded_word(input: &str) -> Option<Vec<u8>> {
-    let mut output = Vec::with_capacity(input.len());
-    let bytes = input.as_bytes();
-    let mut cursor = 0;
-
-    while cursor < bytes.len() {
-        match bytes[cursor] {
-            b'_' => {
-                output.push(b' ');
-                cursor += 1;
-            }
-            b'=' => {
-                if cursor + 2 >= bytes.len() {
-                    return None;
-                }
-                let high = hex_value(bytes[cursor + 1])?;
-                let low = hex_value(bytes[cursor + 2])?;
-                output.push((high << 4) | low);
-                cursor += 3;
-            }
-            byte => {
-                output.push(byte);
-                cursor += 1;
-            }
-        }
-    }
-
-    Some(output)
-}
-
-fn hex_value(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
-}
-
 fn replace_placeholders(input: &str, values: &TemplateValues<'_>) -> String {
     let mut output = String::with_capacity(input.len());
     let bytes = input.as_bytes();
     let mut cursor = 0;
 
     while let Some(found) = placeholders::locate_any_placeholder(bytes, cursor) {
-        println!(
-            "Found placeholder: \"{}\"",
-            String::from_utf8_lossy(&found.name)
-        );
         if found.start > cursor {
             output.push_str(&input[cursor..found.start]);
         }
@@ -246,8 +140,6 @@ fn replace_placeholders(input: &str, values: &TemplateValues<'_>) -> String {
             b"first_name" => Some(values.first_name),
             _ => None,
         };
-
-        println!("setting replacement to: {:?}", replacement);
 
         if let Some(value) = replacement {
             output.push_str(value);
@@ -270,41 +162,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_template_decodes_base64_utf8_subject_before_placeholder_replacement() {
-        let parsed = parse_template(
-            b"Subject: =?UTF-8?B?SGFwcHkgQmlydGhkYXkge3sgZmlyc3RfbmFtZSB9fQ==?=\r\n\r\nBody",
-        )
-        .unwrap();
+    fn parse_template_ignores_subject_header() {
+        let parsed = parse_template(b"Subject: From EML\r\nContent-Type: text/html\r\n\r\nBody")
+            .expect("template parses");
 
-        assert_eq!(parsed.subject, "Happy Birthday {{ first_name }}");
+        assert_eq!(parsed.content_type, "text/html");
+        assert_eq!(parsed.body, "Body");
+    }
 
+    #[test]
+    fn replace_placeholders_supports_subject_templates() {
         let values = TemplateValues {
-            greeting: "Dear Ms.",
-            last_name: "Example",
+            greeting: "Dear",
+            last_name: "Lovelace",
             first_name: "Ada",
         };
+
         assert_eq!(
-            replace_placeholders(&parsed.subject, &values),
+            replace_placeholders("Happy Birthday {{ first_name }}", &values),
             "Happy Birthday Ada"
         );
-    }
-
-    #[test]
-    fn parse_template_decodes_q_encoded_utf8_subject() {
-        let parsed = parse_template(
-            b"Subject: =?UTF-8?Q?Happy_Birthday_=E2=98=BA_{{_first=5Fname_}}?=\n\nBody",
-        )
-        .unwrap();
-
-        assert_eq!(parsed.subject, "Happy Birthday \u{263a} {{ first_name }}");
-    }
-
-    #[test]
-    fn parse_template_joins_adjacent_encoded_subject_words() {
-        let parsed =
-            parse_template(b"Subject: =?UTF-8?B?SGFwcHkg?= =?UTF-8?B?QmlydGhkYXk=?=\n\nBody")
-                .unwrap();
-
-        assert_eq!(parsed.subject, "Happy Birthday");
     }
 }

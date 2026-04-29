@@ -11,13 +11,13 @@ use axum::{
 use serde::Serialize;
 use sqlx::{Sqlite, SqlitePool, migrate::MigrateDatabase};
 
-pub mod error;
 mod birthday_scheduler;
 mod dsgvo;
+pub mod error;
 mod import_people;
 mod mail_template;
-mod placeholders;
 mod people;
+mod placeholders;
 mod send_mail;
 mod settings;
 mod template_mailer;
@@ -90,7 +90,10 @@ fn router() -> Router<AppState> {
     let people_routes = Router::new()
         .route("/schedule", get(birthday_scheduler::index))
         .route("/people", get(people::index))
-        .route("/people/new", get(people::create_get).post(people::create_post))
+        .route(
+            "/people/new",
+            get(people::create_get).post(people::create_post),
+        )
         .route(
             "/people/edit/{id}",
             get(people::edit_get).post(people::edit_post),
@@ -116,6 +119,7 @@ fn router() -> Router<AppState> {
             "/template",
             get(mail_template::index).post(mail_template::upload),
         )
+        .route("/template/subject", post(mail_template::save_subject))
         .route("/template/test-mail", post(mail_template::send_test_mail))
         .route("/template/download", get(mail_template::download))
         .route(
@@ -130,8 +134,14 @@ fn router() -> Router<AppState> {
         .route("/setup", get(users::setup_get).post(users::setup_post))
         .route("/login", get(users::login_get).post(users::login_post))
         .route("/logout", post(users::logout_post))
-        .route("/import", get(import_people::index).post(import_people::upload))
-        .route("/import/{filename}", get(import_people::show).post(import_people::import))
+        .route(
+            "/import",
+            get(import_people::index).post(import_people::upload),
+        )
+        .route(
+            "/import/{filename}",
+            get(import_people::show).post(import_people::import),
+        )
         .route(
             "/static/style.css",
             get((

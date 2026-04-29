@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use lettre::{
     Address, AsyncSmtpTransport, AsyncTransport, Tokio1Executor, address::Envelope,
     transport::smtp::authentication::Credentials,
@@ -24,7 +25,7 @@ pub async fn send_mail(
 
     let from_header = format_mailbox_header(&settings.sender_name, &settings.sender_email);
     let to_header = sanitize_header_value(target_mail);
-    let subject_header = sanitize_header_value(if subject.trim().is_empty() {
+    let subject_header = format_subject_header(if subject.trim().is_empty() {
         "No Subject"
     } else {
         subject
@@ -97,11 +98,76 @@ fn sanitize_header_value(value: &str) -> String {
     value.replace('\r', "").replace('\n', "")
 }
 
+fn format_subject_header(subject: &str) -> String {
+    let clean_subject = sanitize_header_value(subject);
+    if clean_subject.is_ascii() {
+        return clean_subject;
+    }
+
+    encode_utf8_header_value(&clean_subject)
+}
+
+fn encode_utf8_header_value(value: &str) -> String {
+    value
+        .chars()
+        .fold(Vec::<String>::new(), |mut encoded_words, character| {
+            let mut bytes = [0; 4];
+            let encoded = character.encode_utf8(&mut bytes).as_bytes();
+
+            let should_start_new_word = encoded_words
+                .last()
+                .map(|current| current.len() + encoded.len() > 45)
+                .unwrap_or(true);
+
+            if should_start_new_word {
+                encoded_words.push(String::new());
+            }
+            encoded_words
+                .last_mut()
+                .expect("encoded word exists")
+                .push_str(character.encode_utf8(&mut bytes));
+            encoded_words
+        })
+        .into_iter()
+        .map(|chunk| format!("=?UTF-8?B?{}?=", BASE64_STANDARD.encode(chunk.as_bytes())))
+        .collect::<Vec<_>>()
+        .join("\r\n ")
+}
+
 fn format_mailbox_header(name: &str, email: &str) -> String {
     let clean_name = sanitize_header_value(name).trim().to_string();
     if clean_name.is_empty() {
         sanitize_header_value(email)
     } else {
         format!("{} <{}>", clean_name, sanitize_header_value(email))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ascii_subject_is_not_encoded() {
+        assert_eq!(
+            format_subject_header("Happy Birthday Ada"),
+            "Happy Birthday Ada"
+        );
+    }
+
+    #[test]
+    fn non_ascii_subject_is_encoded_as_utf8_base64() {
+        assert_eq!(
+            format_subject_header("Happy Birthday Jörg"),
+            "=?UTF-8?B?SGFwcHkgQmlydGhkYXkgSsO2cmc=?="
+        );
+    }
+
+    #[test]
+    fn subject_is_sanitized_before_encoding() {
+        assert_eq!(
+            format_subject_header("Grüße\r\nBcc: hidden@example.com"),
+            "=?UTF-8?B?R3LDvMOfZUJjYzogaGlkZGVuQGV4YW1wbGUuY29t?="
+        );
     }
 }
